@@ -1,12 +1,14 @@
-// sheet：図面ボード。英字の番号つきパネルをグリッドに並べる。blueprint テーマでは外枠に座標の目盛りがつく（装飾のみ）。
+// sheet: drawing board. Panels with letter IDs are laid out on a grid. The blueprint theme adds coordinate rulers to the frame (decoration only).
 import { panelHtml, headHtml } from './panel.ts';
+import type { TemplateInput } from './panel.ts';
+import type { Attrs } from '../parse.ts';
 
-const ruler = (side, labels) =>
+const ruler = (side: string, labels: ReadonlyArray<string | number>): string =>
   `<div class="am-ruler am-ruler--${side}" aria-hidden="true">${labels.map((l) => `<span>${l}</span>`).join('')}</div>`;
 
-// 読む順にグリッドをシミュレートする。あるパネルの後ろの残り列に次のパネルが入らないときは、そのパネルを広げて行を埋め、空きを残さない。
-// rows で複数行にまたがるパネルがあると行の埋まり方が複雑になるので、作者の配置をそのまま使う。
-export function fillRows(panels, cols) {
+// Simulate the grid in reading order. When the next panel does not fit in the columns left after a panel, widen that panel to fill the row so no gap remains.
+// Panels that span several rows make row filling complex, so the author's layout is used as is.
+export function fillRows(panels: ReadonlyArray<{ attrs: Attrs }>, cols: number): number[] {
   const spans = panels.map((p) => Math.max(1, Math.min(Number(p.attrs.span) || 1, cols)));
   if (panels.some((p) => Number(p.attrs.rows) > 1)) return spans;
   let used = 0;
@@ -20,7 +22,7 @@ export function fillRows(panels, cols) {
   });
 }
 
-export function sheet({ meta, introHtml, panels }) {
+export function sheet({ meta, introHtml, panels }: TemplateInput): string {
   const cols = Math.max(1, Math.min(Number(meta.cols) || 3, 12));
   const spans = fillRows(panels, cols);
   const placed = panels.map((p, i) => ({ ...p, attrs: { ...p.attrs, span: spans[i] } }));

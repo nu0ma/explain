@@ -2,6 +2,7 @@ import { mdInline } from '../markdown.ts';
 import { esc } from '../svg/text.ts';
 import { ComponentError, contentLines } from './error.ts';
 import { parseAttrs } from '../parse.ts';
+import type { Component } from './types.ts';
 
 export default {
   name: 'kv',
@@ -24,4 +25,4 @@ export default {
     if (!cells.length) throw new ComponentError('kv には キー: 値 の行が 1 行以上必要です', 1);
     return `<dl class="am-kv" style="--kv-cols: ${cols}">${cells.join('')}</dl>`;
   },
-};
+} satisfies Component;

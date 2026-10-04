@@ -8,7 +8,7 @@ import { get } from 'node:http';
 import { main, shouldOpen } from '../src/cli.ts';
 import { findSimplified } from './helpers/chinese.ts';
 
-let dir;
+let dir: string;
 before(() => { dir = mkdtempSync(join(tmpdir(), 'explain-test-')); });
 after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -18,7 +18,7 @@ function sink() {
   return { stream, get text() { return text; } };
 }
 
-async function run(args, { stdin = '', env = {} } = {}) {
+async function run(args: string[], { stdin = '', env = {} }: { stdin?: string; env?: NodeJS.ProcessEnv } = {}) {
   const out = sink();
   const err = sink();
   const code = await main(args, {
@@ -41,7 +41,9 @@ test('cli: --version と --help', async () => {
 test('cli render: 標準入力から読み、EXPLAIN_HOME/pages に書いて、パスと集計を出す', async () => {
   const r = await run(['render', '-'], { stdin: GOOD });
   assert.equal(r.code, 0, r.err);
-  const file = r.out.match(/✓ (.+\.html)/)[1];
+  const m = r.out.match(/✓ (.+\.html)/);
+  assert.ok(m, r.out);
+  const file = m[1];
   assert.ok(file.startsWith(join(dir, 'pages', 'CLI-テスト-')));
   assert.match(readFileSync(file, 'utf8'), /<h1>CLI テスト<\/h1>/);
   assert.match(r.out, /sheet · blueprint · パネル 1 枚 · flow×1/);
@@ -184,7 +186,7 @@ test('cli: 出力の文言に簡体字が出ない', async () => {
 });
 
 test('shouldOpen: --no-open > EXPLAIN_NO_OPEN > 設定 open。--open は必ず開く', () => {
-  const cases = [
+  const cases: { req: Parameters<typeof shouldOpen>; want: boolean }[] = [
     { req: [{}, {}, { open: true }], want: true },
     { req: [{}, {}, { open: false }], want: false },
     { req: [{ 'no-open': true }, {}, { open: true }], want: false },
@@ -208,8 +210,8 @@ test('cli render --watch: 標準入力や原稿なしでは使えない', async 
   }
 });
 
-// 条件を満たすまで少しずつ待つ。
-async function until(fn, label) {
+// Poll until the condition holds.
+async function until<T>(fn: () => T | Promise<T>, label: string): Promise<NonNullable<T>> {
   for (let i = 0; i < 200; i++) {
     const v = await fn();
     if (v) return v;
@@ -240,15 +242,16 @@ test('cli render --watch: 配信し、保存すると作り直して再読み込
       { host: `evil.example:${new URL(url).port}`, wantCode: 403 },
     ];
     for (const { host, wantCode } of hosts) {
-      const code = await new Promise((resolve, reject) => {
+      const code = await new Promise<number | undefined>((resolve, reject) => {
         get(url, { headers: { host } }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject);
       });
       assert.equal(code, wantCode, host);
     }
 
     const events = await fetch(`${url}__explain/events`);
+    assert.ok(events.body);
     const reader = events.body.getReader();
-    await reader.read(); // 接続の確認
+    await reader.read(); // connection check
     writeFileSync(file, GOOD.replace('CLI テスト', '書き換えた題名'));
     const { value } = await reader.read();
     assert.match(new TextDecoder().decode(value), /data: reload/);

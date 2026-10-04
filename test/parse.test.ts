@@ -64,6 +64,7 @@ test('ブロックの分割：Markdown とコードブロックを分け、言�
 test('コードブロックの引数：```flow LR を lang と args に分ける', () => {
   const doc = parseDoc('## X\n```flow LR\nA -> B\n```');
   const f = doc.panels[0].blocks[0];
+  if (f.type !== 'fence') assert.fail(`expected a fence block, got ${f.type}`);
   assert.equal(f.lang, 'flow');
   assert.equal(f.args, 'LR');
 });

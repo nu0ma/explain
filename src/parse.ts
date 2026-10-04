@@ -1,8 +1,68 @@
-// 原稿の解析：frontmatter → meta、`## ` 見出し → パネル（slot）、パネル本体 → Markdown ブロックとコードブロック。
-// 構造を切り分けるだけで描画はしない。行番号はすべて原稿ファイルの 1 始まりの行番号で、エラー表示と STE 検査に使う。
+// Manuscript parsing: frontmatter -> meta, `## ` headings -> panels (slots), panel bodies -> Markdown blocks and code blocks.
+// Only splits the structure; no rendering. All line numbers are 1-based lines of the manuscript file, used for error display and STE checks.
+
+/** A frontmatter / override value. Only `cols` and `span` are coerced to numbers. */
+export type MetaValue = string | number | boolean;
+
+export interface Meta {
+  template: string;
+  theme: string;
+  style: string;
+  mode: string;
+  cols: number | string;
+  title: string;
+  static?: string;
+  subtitle?: string;
+  [key: string]: MetaValue | undefined;
+}
+
+/** Heading attributes such as `{span=2 bare}`. A bare key becomes `true`. */
+export type AttrValue = string | number | boolean;
+export type Attrs = Record<string, AttrValue>;
+
+export interface MdBlock {
+  type: 'md';
+  text: string;
+  line: number;
+}
+
+export interface FenceBlock {
+  type: 'fence';
+  lang: string;
+  args: string;
+  text: string;
+  line: number;
+}
+
+export type Block = MdBlock | FenceBlock;
+
+export interface Panel {
+  id: string;
+  title: string;
+  attrs: Attrs;
+  line: number;
+  blocks: Block[];
+}
+
+export interface ParsedDoc {
+  meta: Meta;
+  intro: Block[];
+  panels: Panel[];
+  /** Line of the leading `# Title` in the body, or null when the title came from frontmatter. */
+  titleLine: number | null;
+}
+
+export type Choices = Readonly<Record<string, readonly string[]>>;
+
+export interface ParseDocOptions {
+  defaults?: Partial<Record<string, MetaValue>>;
+  choices?: Choices;
+}
 
 export class ParseError extends Error {
-  constructor(message, line) {
+  line: number;
+
+  constructor(message: string, line: number) {
     super(message);
     this.name = 'ParseError';
     this.line = line;
@@ -15,9 +75,9 @@ export const CHOICES = Object.freeze({
   style: ['off', '80', 'strict'],
   mode: ['auto', 'light', 'dark'],
   static: ['true', 'false'],
-});
+}) satisfies Choices;
 
-const DEFAULT_META = Object.freeze({
+const DEFAULT_META: Readonly<Meta> = Object.freeze({
   template: 'sheet',
   theme: 'blueprint',
   style: '80',
@@ -33,40 +93,40 @@ const ATTR_BLOCK = /\s*\{([^{}]*)\}\s*$/;
 const PANEL_ID = /^([A-Z][0-9]?)\s+(.+)$/;
 const ATTR_TOKEN = /([\w-]+)(?:=("[^"]*"|'[^']*'|\S+))?/g;
 
-// コマンドラインの引数で meta を上書きする。undefined のキーは飛ばし、選択肢のあるキーは値を確かめる。
-/**
- * @param {Record<string, any>} meta
- * @param {Record<string, any>} overrides
- * @param {Readonly<Record<string, readonly string[]>>} [allowed]
- */
-export function applyOverrides(meta, overrides, allowed = CHOICES) {
+// Overrides meta with command-line arguments. Skips undefined values and validates keys that have choices.
+export function applyOverrides(
+  meta: Record<string, MetaValue | undefined>,
+  overrides: Readonly<Record<string, MetaValue | undefined>>,
+  allowed: Choices = CHOICES,
+): void {
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) continue;
-    if (allowed[key] && !allowed[key].includes(String(value))) {
-      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${allowed[key].join(' | ')}`, 0);
+    const options = allowed[key];
+    if (options && !options.includes(String(value))) {
+      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${options.join(' | ')}`, 0);
     }
     meta[key] = value;
   }
 }
 
-// defaults：ユーザー設定の既定値（theme / mode / style など）。原稿の frontmatter に明示した値が優先される。
-// choices で一部のキーの選択肢を広げられる（動画の原稿では theme: 3b1b も使える）。
-export function parseDoc(source, { defaults = {}, choices = {} } = {}) {
+// defaults: user-configured defaults (theme / mode / style, etc.). Values set explicitly in the frontmatter win.
+// choices widens the allowed values for some keys (video manuscripts also accept theme: 3b1b).
+export function parseDoc(source: unknown, { defaults = {}, choices = {} }: ParseDocOptions = {}): ParsedDoc {
   const lines = String(source).replace(/\r\n?/g, '\n').split('\n');
   const { meta, bodyStart } = parseFrontmatter(lines, { ...DEFAULT_META, ...defaults }, { ...CHOICES, ...choices });
   const sections = splitSections(lines, bodyStart);
   const { intro, titleLine } = extractTitle(sections.intro, meta);
   const panels = assignIds(sections.panels);
-  // titleLine：本文の先頭の "# 題名" から題名を取ったときの行番号（frontmatter の title なら null）。
+  // titleLine: line number when the title came from a leading "# Title" in the body (null for a frontmatter title).
   return { meta, intro, panels, titleLine };
 }
 
-function parseFrontmatter(lines, base, allowed) {
+function parseFrontmatter(lines: string[], base: Meta, allowed: Choices): { meta: Meta; bodyStart: number } {
   if (lines[0]?.trim() !== '---') return { meta: { ...base }, bodyStart: 0 };
   const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
   if (end === -1) throw new ParseError('frontmatter が閉じていません。終わりの行 --- がありません', 1);
 
-  const entries = {};
+  const entries: Record<string, { value: string | number; line: number }> = {};
   for (let i = 1; i < end; i++) {
     const raw = lines[i].replace(/\s+#.*$/, '').trim();
     if (!raw || raw.startsWith('#')) continue;
@@ -75,21 +135,25 @@ function parseFrontmatter(lines, base, allowed) {
     entries[m[1]] = { value: coerce(m[1], unquote(m[2])), line: i + 1 };
   }
 
-  const meta = { ...base };
+  const meta: Meta = { ...base };
   for (const [key, { value, line }] of Object.entries(entries)) {
-    if (allowed[key] && !allowed[key].includes(String(value))) {
-      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${allowed[key].join(' | ')}`, line);
+    const options = allowed[key];
+    if (options && !options.includes(String(value))) {
+      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${options.join(' | ')}`, line);
     }
-    meta[key] = allowed[key] ? String(value) : value;
+    meta[key] = options ? String(value) : value;
   }
   return { meta, bodyStart: end + 1 };
 }
 
-function splitSections(lines, start) {
-  const intro = [];
-  const panels = [];
-  let current = { blocks: intro };
-  let mdBuf = null;
+/** A panel before `assignIds` fills in missing ids. */
+type RawPanel = Omit<Panel, 'id'> & { id: string | null };
+
+function splitSections(lines: string[], start: number): { intro: Block[]; panels: RawPanel[] } {
+  const intro: Block[] = [];
+  const panels: RawPanel[] = [];
+  let current: { blocks: Block[] } = { blocks: intro };
+  let mdBuf: { line: number; lines: string[] } | null = null;
   const flushMd = () => {
     if (mdBuf && mdBuf.lines.some((l) => l.trim())) {
       current.blocks.push({ type: 'md', text: mdBuf.lines.join('\n'), line: mdBuf.line });
@@ -117,8 +181,9 @@ function splitSections(lines, start) {
     const heading = line.match(PANEL_HEADING);
     if (heading) {
       flushMd();
-      current = { ...parseHeading(heading[1]), line: i + 1, blocks: [] };
-      panels.push(current);
+      const panel: RawPanel = { ...parseHeading(heading[1]), line: i + 1, blocks: [] };
+      panels.push(panel);
+      current = panel;
       continue;
     }
     if (!mdBuf) mdBuf = { line: i + 1, lines: [] };
@@ -128,7 +193,7 @@ function splitSections(lines, start) {
   return { intro, panels };
 }
 
-function findFenceClose(lines, openIdx, marker) {
+function findFenceClose(lines: string[], openIdx: number, marker: string): number {
   const closeRe = new RegExp(`^${marker[0] === '`' ? '`' : '~'}{${marker.length},}\\s*$`);
   for (let j = openIdx + 1; j < lines.length; j++) {
     if (closeRe.test(lines[j])) return j;
@@ -136,9 +201,9 @@ function findFenceClose(lines, openIdx, marker) {
   return -1;
 }
 
-function parseHeading(text) {
+function parseHeading(text: string): { id: string | null; title: string; attrs: Attrs } {
   let rest = text;
-  let attrs = {};
+  let attrs: Attrs = {};
   const attrMatch = rest.match(ATTR_BLOCK);
   if (attrMatch) {
     attrs = parseAttrs(attrMatch[1]);
@@ -150,15 +215,15 @@ function parseHeading(text) {
     : { id: null, title: rest.trim(), attrs };
 }
 
-export function parseAttrs(text) {
-  const attrs = {};
+export function parseAttrs(text: string): Attrs {
+  const attrs: Attrs = {};
   for (const m of text.matchAll(ATTR_TOKEN)) {
     attrs[m[1]] = m[2] === undefined ? true : coerce(m[1], unquote(m[2]));
   }
   return attrs;
 }
 
-function extractTitle(intro, meta) {
+function extractTitle(intro: Block[], meta: Meta): { intro: Block[]; titleLine: number | null } {
   if (meta.title || intro[0]?.type !== 'md') return { intro, titleLine: null };
   const [first, ...rest] = intro;
   const lines = first.text.split('\n');
@@ -172,7 +237,7 @@ function extractTitle(intro, meta) {
   return { intro: [{ ...first, text: remaining.join('\n'), line: first.line + idx + 1 }, ...rest], titleLine };
 }
 
-function assignIds(panels) {
+function assignIds(panels: RawPanel[]): Panel[] {
   const used = new Set(panels.map((p) => p.id).filter(Boolean));
   let code = 'A'.charCodeAt(0);
   const nextFree = () => {
@@ -182,15 +247,15 @@ function assignIds(panels) {
     code++;
     return id;
   };
-  return panels.map((p) => (p.id ? p : { ...p, id: nextFree() }));
+  return panels.map((p) => (p.id ? { ...p, id: p.id } : { ...p, id: nextFree() }));
 }
 
-function unquote(v) {
+function unquote(v: string): string {
   const s = v.trim();
   return /^(["']).*\1$/.test(s) ? s.slice(1, -1) : s;
 }
 
-function coerce(key, value) {
+function coerce(key: string, value: string): string | number {
   if (NUMERIC_KEYS.has(key) && /^\d+$/.test(value)) return Number(value);
   return value;
 }

@@ -8,8 +8,8 @@ import { renderDoc } from '../src/render.ts';
 
 const DEFAULTS = { open: true, theme: 'blueprint', mode: 'auto', style: '80', voice: 'say' };
 
-let home;
-let env;
+let home: string;
+let env: NodeJS.ProcessEnv;
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'explain-config-'));
   env = { EXPLAIN_HOME: home };
@@ -60,6 +60,7 @@ test('readConfig: ファイルが壊れていれば既定値に戻し、警告�
   writeFileSync(configPath(env), '{ not json');
   const { values, warning } = readConfig(env);
   assert.equal(values.open, true);
+  assert.ok(warning);
   assert.match(warning, /config\.json を読めないため/);
 });
 

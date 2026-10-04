@@ -1,6 +1,11 @@
-// 文の注釈：等幅フォントで文を並べ、注釈をつけた部分の下に括弧線を引く。注釈は横位置を見て段をずらし、重ならないようにする。
+// Sentence annotations: set sentences in a monospace font and draw a bracket under each annotated part. Notes are staggered into rows by horizontal position so they do not overlap.
 import { esc, measure } from '../svg/text.ts';
 import { ComponentError, contentLines, fields } from './error.ts';
+import type { Component } from './types.ts';
+
+type AnnotGroup = { title: string; meta: string; lines: string[]; captions: string[] };
+// Occupied [start, end] ranges per row.
+type Rows = Array<Array<[number, number]>>;
 
 const SEG = /\[([^\]]+)\]\{(!?)([^}]*)\}/g;
 const TEXT_SIZE = 14;
@@ -18,9 +23,9 @@ export default {
 - # で 1 組を始める。1 組に複数の文を書ける。注釈が重なるときは自動で段をずらす。`,
   example: '```annot\n# 1 手順の文 | 18 字、上限 35\n[設定ファイル]{対象}を[開く]{!「開封する」は使わない}。\n> 1 文に 1 つの指示だけを書く\n```',
   render(text) {
-    const groups = [];
-    let group = null;
-    const ensure = () => group ?? (group = pushGroup(groups, {}));
+    const groups: AnnotGroup[] = [];
+    let group: AnnotGroup | null = null;
+    const ensure = (): AnnotGroup => group ?? (group = pushGroup(groups, {}));
     for (const { text: t, line } of contentLines(text)) {
       if (t.startsWith('#')) {
         const [title, meta = ''] = fields(t.replace(/^#+\s*/, ''));
@@ -34,15 +39,15 @@ export default {
     if (!groups.length) throw new ComponentError('annot には文が 1 つ以上必要です', 1);
     return groups.map(groupHtml).join('');
   },
-};
+} satisfies Component;
 
-function pushGroup(groups, { title = '', meta = '' }) {
-  const g = { title, meta, lines: [], captions: [] };
+function pushGroup(groups: AnnotGroup[], { title = '', meta = '' }: { title?: string; meta?: string }): AnnotGroup {
+  const g: AnnotGroup = { title, meta, lines: [], captions: [] };
   groups.push(g);
   return g;
 }
 
-function groupHtml(g) {
+function groupHtml(g: AnnotGroup): string {
   const head = g.title || g.meta
     ? `<div class="am-annot-head"><span>${esc(g.title)}</span>${g.meta ? `<span class="am-annot-meta">${esc(g.meta)}</span>` : ''}</div>`
     : '';
@@ -51,12 +56,12 @@ function groupHtml(g) {
   return `<div class="am-annot">${head}${lines}${caps}</div>`;
 }
 
-function sentenceHtml(sentence, line) {
+function sentenceHtml(sentence: string, line: number): string {
   const stripped = sentence.replace(SEG, '');
   if (/\[[^\]]*\]\{|\]\{[^}]*$/.test(stripped)) {
     throw new ComponentError(`annot の注釈が閉じていません。[部分]{注釈} の形で書いてください："${sentence}"`, line);
   }
-  const rows = [];
+  const rows: Rows = [];
   let out = '';
   let plain = '';
   let last = 0;
@@ -78,8 +83,8 @@ function sentenceHtml(sentence, line) {
   return `<div class="am-annot-line${wrapCls}" style="--rows: ${rows.length}">${out}</div>`;
 }
 
-// 貪欲法で置く：既存の注釈と重ならない最初の段を使う。
-function placeNote(rows, start, end) {
+// Greedy placement: use the first row where the note does not overlap an existing one.
+function placeNote(rows: Rows, start: number, end: number): number {
   const idx = rows.findIndex((ranges) => ranges.every(([s, e]) => end <= s || start >= e));
   if (idx !== -1) {
     rows[idx].push([start, end]);

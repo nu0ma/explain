@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderDoc, RenderError, UI } from '../src/render.ts';
 import { SIMPLIFIED_ONLY } from './helpers/chinese.ts';
 import { ParseError } from '../src/parse.ts';
+import type { Attrs } from '../src/parse.ts';
 
 const SRC = `---
 title: テストページ
@@ -72,7 +73,9 @@ test('render: html ブロックはそのまま埋め込み、未知の言語は�
 test('render: 原稿をエスケープして隠し textarea に埋め込み、元どおりに取り出せる', () => {
   const src = '## A\n```html\n<script>x</script></textarea>\n```';
   const { html } = renderDoc(src);
-  const embedded = html.match(/<textarea id="am-source" hidden readonly aria-hidden="true">([\s\S]*?)<\/textarea>/)[1];
+  const m = html.match(/<textarea id="am-source" hidden readonly aria-hidden="true">([\s\S]*?)<\/textarea>/);
+  assert.ok(m);
+  const embedded = m[1];
   assert.doesNotMatch(embedded, /<\/?(script|textarea)/);
   const unescaped = embedded.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
   assert.equal(unescaped, src);
@@ -159,14 +162,14 @@ test('render: rows で縦にまたがり、bare でパネルの見出しを消�
 
 test('sheet: 次のパネルが入らないときは今の行を埋め、空きを残さない', async () => {
   const { fillRows } = await import('../src/templates/sheet.ts');
-  const P = (span) => ({ attrs: span ? { span } : {} });
-  // cols=2：A(2) | B(1) C(2) → B の後ろに C が入らないので B を 2 に広げる
+  const P = (span?: number): { attrs: Attrs } => ({ attrs: span ? { span } : {} });
+  // cols=2: A(2) | B(1) C(2) -> C does not fit after B, so B widens to 2
   assert.deepEqual(fillRows([P(2), P(), P(2), P()], 2), [2, 2, 2, 2]);
-  // cols=3：A(1) B(1) C(2) → A と B で 2 列。C が入らないので B を 2 に広げる。C(2) は最後の行なので 3 まで広げる
+  // cols=3: A(1) B(1) C(2) -> A and B use 2 columns. C does not fit, so B widens to 2. C(2) is on the last row, so it widens to 3
   assert.deepEqual(fillRows([P(), P(), P(2)], 3), [1, 2, 3]);
-  // ちょうど埋まるときは変えない
+  // Rows that fill exactly are unchanged
   assert.deepEqual(fillRows([P(), P(2), P(3)], 3), [1, 2, 3]);
-  // rows を使うときは調整せず、作者の配置を残す
+  // With rows, nothing is adjusted and the author's layout is kept
   assert.deepEqual(fillRows([{ attrs: { rows: 2 } }, P(), P(2)], 3), [1, 1, 2]);
 });
 

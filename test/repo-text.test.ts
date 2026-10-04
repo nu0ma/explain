@@ -7,7 +7,7 @@ import { findSimplified } from './helpers/chinese.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
-function files(dir) {
+function files(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     return statSync(path).isDirectory() ? files(path) : [path];

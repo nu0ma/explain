@@ -1,17 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPONENTS, ComponentError } from '../src/components/index.ts';
+import type { Component, RenderContext } from '../src/components/index.ts';
 import { parseFlow } from '../src/components/flow.ts';
 import { parseSequence } from '../src/components/sequence.ts';
 import { smoothPath } from '../src/svg/shapes.ts';
 
-const ctx = (args = '') => ({ args, uid: () => 'u1' });
-const render = (name, text, args) => COMPONENTS.get(name).render(text, ctx(args));
-const throwsAt = (fn, line) =>
+const ctx = (args = ''): RenderContext => ({ args, uid: () => 'u1' });
+const component = (name: string): Component => {
+  const c = COMPONENTS.get(name);
+  if (!c) throw new Error(`unknown component: ${name}`);
+  return c;
+};
+const render = (name: string, text: string, args?: string): string => component(name).render(text, ctx(args));
+const throwsAt = (fn: () => unknown, line: number): void =>
   assert.throws(fn, (e) => e instanceof ComponentError && e.line === line);
-const viewBox = (svg) => svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/).slice(1).map(Number);
+const viewBox = (svg: string): number[] => {
+  const m = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+  assert.ok(m, 'viewBox がない');
+  return m.slice(1).map(Number);
+};
 
-// ── 図形 ──
+// ── shapes ──
 test('smoothPath: 2 点なら直線、3 点以上ならなめらかな曲線', () => {
   assert.equal(smoothPath([{ x: 0, y: 0 }, { x: 10, y: 0 }]), 'M0,0 L10,0');
   assert.match(smoothPath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }]), /^M0,0 L5,0 Q10,0 10,5 L10,10$/);
@@ -22,9 +32,11 @@ test('parseSequence: 参加者は登場順。実線・点線・自分自身の�
   const m = parseSequence('A -> B: リクエスト\nB --> A: レスポンス\nB -> B: 検証\nnote A, B: 接続を確立');
   assert.deepEqual(m.participants, ['A', 'B']);
   assert.deepEqual(m.steps.map((s) => s.kind), ['msg', 'msg', 'msg', 'note']);
-  assert.equal(m.steps[1].dashed, true);
-  assert.equal(m.steps[2].from, m.steps[2].to);
-  assert.deepEqual(m.steps[3].over, ['A', 'B']);
+  const [, reply, self, note] = m.steps;
+  assert.ok(reply.kind === 'msg' && self.kind === 'msg' && note.kind === 'note');
+  assert.equal(reply.dashed, true);
+  assert.equal(self.from, self.to);
+  assert.deepEqual(note.over, ['A', 'B']);
 });
 
 test('parseSequence: participants の行で並び順を固定する', () => {
@@ -62,10 +74,10 @@ test('parseFlow: 連鎖・分岐・形の印・強調・矢印のラベル', () 
   const m = parseFlow('(開始) -> 入力 -> {正しい?}\n正しい? -> 処理 & *[(DB)]: はい\n正しい? --> エラー: いいえ');
   const shape = Object.fromEntries([...m.nodes.values()].map((n) => [n.id, n.shape]));
   assert.deepEqual(shape, { 開始: 'round', 入力: 'rect', '正しい?': 'diamond', 処理: 'rect', DB: 'db', エラー: 'rect' });
-  assert.equal(m.nodes.get('DB').hi, true);
+  assert.equal(m.nodes.get('DB')?.hi, true);
   assert.equal(m.edges.length, 5);
   assert.deepEqual(m.edges.filter((e) => e.label === 'はい').map((e) => e.to), ['処理', 'DB']);
-  assert.equal(m.edges.find((e) => e.to === 'エラー').dashed, true);
+  assert.equal(m.edges.find((e) => e.to === 'エラー')?.dashed, true);
 });
 
 test('parseFlow: 角括号でコロンを含むノードの文字を守る', () => {

@@ -1,5 +1,5 @@
-// explain CLI：render / video / lint / config / list / help。
-// main() は入出力ストリームと環境変数を受け取れるので、テストから差し替えられる。
+// explain CLI: render / video / lint / config / list / help.
+// main() accepts I/O streams and environment variables, so tests can substitute them.
 
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -17,9 +17,46 @@ import { serveWatch } from './watch.ts';
 import { fileStamp, clock } from './time.ts';
 import { pickProvider, compressAudio, cacheStats, CACHE_MAX_BYTES, TtsError, VOICES } from './video/tts.ts';
 import { exportMp4, ExportError } from './video/export.ts';
-import { explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from './config.ts';
+import { explainHome, readConfig, setConfig, resetConfig, isConfigKey, CONFIG_KEYS, ConfigError, type ConfigValues } from './config.ts';
 
 const MAX_LISTED_WARNINGS = 20;
+
+type Print = (s?: string) => void;
+type Fail = (s: string) => void;
+type TtsProvider = ReturnType<typeof pickProvider>;
+type EncodeAudio = typeof compressAudio;
+type Warning = Parameters<typeof formatWarning>[0];
+
+export type MainIO = {
+  stdout?: NodeJS.WritableStream;
+  stderr?: NodeJS.WritableStream;
+  stdin?: AsyncIterable<string | Buffer>;
+  env?: NodeJS.ProcessEnv;
+  cwd?: string;
+  // Stops `render --watch`; without it, SIGINT stops the server.
+  signal?: AbortSignal;
+  // Replaces the TTS provider chosen from --voice (null means captions only).
+  ttsProvider?: TtsProvider;
+  encodeAudio?: EncodeAudio | null;
+};
+
+export type CliOptions = {
+  out?: string;
+  'no-open'?: boolean;
+  open?: boolean;
+  static?: boolean;
+  watch?: boolean;
+  theme?: string;
+  template?: string;
+  style?: string;
+  mode?: string;
+  voice?: string;
+  mp4?: boolean;
+  help?: boolean;
+  version?: boolean;
+};
+
+type Context = { print: Print; fail: Fail; env: NodeJS.ProcessEnv; cwd?: string };
 
 const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの解説 HTML と解説動画を作る
 
@@ -104,12 +141,12 @@ Client -> Server: ACK
 - ffmpeg があれば、再生ページに埋め込む音声を AAC に圧縮する（なければ WAV のまま）。
 - 動画は再生に JavaScript が要るため、--static は使えない。`;
 
-export async function main(argv, io = {}) {
+export async function main(argv: string[], io: MainIO = {}): Promise<number> {
   const out = io.stdout ?? process.stdout;
   const err = io.stderr ?? process.stderr;
   const env = io.env ?? process.env;
-  const print = (s = '') => out.write(`${s}\n`);
-  const fail = (s) => err.write(`${s}\n`);
+  const print: Print = (s = '') => out.write(`${s}\n`);
+  const fail: Fail = (s) => err.write(`${s}\n`);
 
   let parsed;
   try {
@@ -133,10 +170,11 @@ export async function main(argv, io = {}) {
       },
     });
   } catch (e) {
-    fail(`✗ 引数を解釈できません：${e.message}\n\n${USAGE}`);
+    fail(`✗ 引数を解釈できません：${errorMessage(e)}\n\n${USAGE}`);
     return 2;
   }
-  const { values: opts, positionals: [cmd, arg, ...rest] } = parsed;
+  const { values, positionals: [cmd, arg, ...rest] } = parsed;
+  const opts: CliOptions = values;
 
   if (opts.version) return print(VERSION), 0;
   if (opts.help || !cmd) return print(USAGE), 0;
@@ -162,16 +200,16 @@ export async function main(argv, io = {}) {
   }
 }
 
-async function withSource(arg, io, fail, fn) {
+async function withSource(arg: string | undefined, io: MainIO, fail: Fail, fn: (src: string) => number | Promise<number>): Promise<number> {
   if (!arg) {
     fail('✗ 原稿を指定してください。ファイルのパスを渡すか、- で標準入力から読みます');
     return 2;
   }
-  let src;
+  let src: string;
   try {
     src = arg === '-' ? await readStream(io.stdin ?? process.stdin) : readFileSync(resolve(io.cwd ?? process.cwd(), arg), 'utf8');
   } catch (e) {
-    fail(`✗ 原稿を読めません：${e.message}`);
+    fail(`✗ 原稿を読めません：${errorMessage(e)}`);
     return 2;
   }
   if (!src.trim()) {
@@ -181,14 +219,14 @@ async function withSource(arg, io, fail, fn) {
   return fn(src);
 }
 
-async function readStream(stream) {
-  const chunks = [];
+async function readStream(stream: AsyncIterable<string | Buffer>): Promise<string> {
+  const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   return Buffer.concat(chunks).toString('utf8');
 }
 
-// 自動で開くか：--open（必ず開く）> --no-open > EXPLAIN_NO_OPEN（0 以外）> CI 環境 > 設定 open。
-export function shouldOpen(opts, env, config) {
+// Whether to open automatically: --open (always opens) > --no-open > EXPLAIN_NO_OPEN (other than 0) > CI > the open setting.
+export function shouldOpen(opts: Pick<CliOptions, 'open' | 'no-open'>, env: NodeJS.ProcessEnv, config: Partial<Pick<ConfigValues, 'open'>>): boolean {
   if (opts.open) return true;
   if (opts['no-open']) return false;
   if (env.EXPLAIN_NO_OPEN && env.EXPLAIN_NO_OPEN !== '0') return false;
@@ -196,7 +234,7 @@ export function shouldOpen(opts, env, config) {
   return config.open !== false;
 }
 
-function cmdRender(src, opts, { print, fail, env, cwd }) {
+function cmdRender(src: string, opts: CliOptions, { print, fail, env, cwd }: Context): number {
   const config = readConfig(env);
   if (config.warning) fail(`! ${config.warning}`);
   const { theme, mode, style } = config.values;
@@ -216,8 +254,8 @@ function cmdRender(src, opts, { print, fail, env, cwd }) {
   return 0;
 }
 
-// --watch：ファイルの原稿だけを受け付ける。エラーがあっても止まらず、直して保存すれば作り直す。
-async function cmdWatch(arg, opts, { print, fail, env, cwd, signal }) {
+// --watch accepts only a manuscript file. Errors do not stop it; fixing and saving rebuilds the page.
+async function cmdWatch(arg: string | undefined, opts: CliOptions, { print, fail, env, cwd, signal }: Context & { signal?: AbortSignal }): Promise<number> {
   if (!arg || arg === '-') {
     fail('✗ --watch には原稿のファイルを指定してください。標準入力は見張れません');
     return 2;
@@ -227,12 +265,12 @@ async function cmdWatch(arg, opts, { print, fail, env, cwd, signal }) {
   if (config.warning) fail(`! ${config.warning}`);
   const { theme, mode, style } = config.values;
   const out = opts.out ? resolve(cwd ?? process.cwd(), opts.out) : null;
-  const build = () => {
-    let src;
+  const build = (): string | null => {
+    let src: string;
     try {
       src = readFileSync(file, 'utf8');
     } catch (e) {
-      fail(`✗ 原稿を読めません：${e.message}`);
+      fail(`✗ 原稿を読めません：${errorMessage(e)}`);
       return null;
     }
     try {
@@ -248,41 +286,47 @@ async function cmdWatch(arg, opts, { print, fail, env, cwd, signal }) {
       try {
         reportError(e, fail);
       } catch {
-        fail(`✗ 内部エラー：${e.stack || e}`);
+        fail(`✗ 内部エラー：${(e instanceof Error && e.stack) || e}`);
       }
       return null;
     }
   };
 
-  let ac = null;
-  if (!signal) {
-    ac = new AbortController();
+  let stopSignal = signal;
+  if (!stopSignal) {
+    const ac = new AbortController();
     process.once('SIGINT', () => ac.abort());
+    stopSignal = ac.signal;
   }
   try {
     await serveWatch(file, build, {
-      signal: signal ?? ac.signal,
+      signal: stopSignal,
       onListen: (url) => {
         print(`✓ ${url}（原稿を保存すると作り直します。Ctrl+C で終了）`);
         if (shouldOpen(opts, env, config.values)) openFile(url);
       },
     });
   } catch (e) {
-    fail(`✗ サーバーを起動できません：${e.message}`);
+    fail(`✗ サーバーを起動できません：${errorMessage(e)}`);
     return 1;
   }
   return 0;
 }
 
-async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, encodeAudio = compressAudio }) {
+async function cmdVideo(
+  src: string,
+  opts: CliOptions,
+  { print, fail, env, cwd, provider: injected, encodeAudio = compressAudio }: Context & { provider?: TtsProvider; encodeAudio?: EncodeAudio | null },
+): Promise<number> {
   const config = readConfig(env);
   if (config.warning) fail(`! ${config.warning}`);
   const voice = opts.voice ?? config.values.voice;
-  if (!VOICES.includes(voice)) {
+  if (!(VOICES as readonly string[]).includes(voice)) {
     fail(`✗ voice の値 "${voice}" は使えません。選択肢：${VOICES.join(' | ')}`);
     return 2;
   }
-  let result;
+  let result: Awaited<ReturnType<typeof renderVideo>>;
+  let voiceName: string;
   try {
     const provider = injected !== undefined ? injected : pickProvider(voice);
     result = await renderVideo(src, {
@@ -290,10 +334,10 @@ async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, 
       cacheDir: ttsCacheDir(env),
       defaults: { style: config.values.style, theme: config.values.theme, mode: config.values.mode },
       overrides: { style: opts.style, theme: opts.theme, mode: opts.mode },
-      onProgress: (msg) => fail(`  ${msg}`),
+      onProgress: (msg: string) => fail(`  ${msg}`),
       encodeAudio,
     });
-    result.voiceName = provider ? provider.name : 'なし（字幕のみ）';
+    voiceName = provider ? provider.name : 'なし（字幕のみ）';
   } catch (e) {
     if (e instanceof TtsError) {
       fail(`✗ 音声を合成できません：${e.message}。--voice off にすると字幕だけで作れます`);
@@ -303,14 +347,14 @@ async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, 
   }
   const file = writeOutput(result.html, { dir: 'videos', title: result.meta.title, out: opts.out, env, cwd });
   print(`✓ ${file}`);
-  print(`  video · 場面 ${result.stats.panels} 個 · ナレーション ${result.beats} 文 · ${result.duration.toFixed(1)} 秒 · 音声：${result.voiceName}`);
+  print(`  video · 場面 ${result.stats.panels} 個 · ナレーション ${result.beats} 文 · ${result.duration.toFixed(1)} 秒 · 音声：${voiceName}`);
   printWarnings(result.warnings, print, result.meta.style);
 
   if (opts.mp4) {
     const mp4 = file.replace(/\.html?$/i, '') + '.mp4';
     try {
       const started = Date.now();
-      await exportMp4(file, mp4, { wav: result.wav, env, onProgress: (i, n) => fail(`  MP4 を書き出し中：${i}/${n} フレーム`) });
+      await exportMp4(file, mp4, { wav: result.wav, env, onProgress: (i: number, n: number) => fail(`  MP4 を書き出し中：${i}/${n} フレーム`) });
       print(`✓ ${mp4}（書き出し ${((Date.now() - started) / 1000).toFixed(0)} 秒）`);
     } catch (e) {
       if (!(e instanceof ExportError)) throw e;
@@ -322,15 +366,15 @@ async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, 
   return 0;
 }
 
-function cmdLint(src, opts, { print, fail }) {
-  let doc;
+function cmdLint(src: string, opts: CliOptions, { print, fail }: Pick<Context, 'print' | 'fail'>): number {
+  let doc: ReturnType<typeof parseDoc>;
   try {
     doc = parseDoc(src);
   } catch (e) {
     return reportError(e, fail);
   }
   const style = opts.style ?? doc.meta.style;
-  if (!CHOICES.style.includes(style)) {
+  if (!(CHOICES.style as readonly string[]).includes(style)) {
     fail(`✗ style の値 "${style}" は使えません。選択肢：${CHOICES.style.join(' | ')}`);
     return 2;
   }
@@ -340,7 +384,7 @@ function cmdLint(src, opts, { print, fail }) {
   return style === 'strict' && blockingWarnings(warnings).length ? 1 : 0;
 }
 
-function printWarnings(warnings, print, style) {
+function printWarnings(warnings: readonly Warning[], print: Print, style: string): void {
   if (style === 'off') return print('  STE 検査はオフです');
   if (!warnings.length) return print('  STE ✓ 警告 0 件');
   print(`  STE 警告 ${warnings.length} 件（原稿を直してから再実行してください）：`);
@@ -348,7 +392,7 @@ function printWarnings(warnings, print, style) {
   if (warnings.length > MAX_LISTED_WARNINGS) print(`  … ほかに ${warnings.length - MAX_LISTED_WARNINGS} 件。すべて見るには explain lint を使ってください`);
 }
 
-function reportError(e, fail) {
+function reportError(e: unknown, fail: Fail): number {
   if (e instanceof RenderError) {
     fail(`✗ L${e.line} [${e.component}] ${e.message}`);
     if (e.example) fail(`  正しい例：\n${e.example.replace(/^/gm, '    ')}`);
@@ -367,9 +411,9 @@ function reportError(e, fail) {
   throw e;
 }
 
-const showValue = (v) => (typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v));
+const showValue = (v: string | boolean): string => (typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v));
 
-function cmdConfig(args, { print, fail, env }) {
+function cmdConfig(args: string[], { print, fail, env }: Omit<Context, 'cwd'>): number {
   const [action, key, value] = args;
   try {
     if (action === 'set') {
@@ -378,7 +422,7 @@ function cmdConfig(args, { print, fail, env }) {
       return 0;
     }
     if (action === 'get') {
-      if (!CONFIG_KEYS[key]) throw new ConfigError(`設定項目 "${key}" はありません。使える項目：${Object.keys(CONFIG_KEYS).join(' | ')}`);
+      if (key === undefined || !isConfigKey(key)) throw new ConfigError(`設定項目 "${key}" はありません。使える項目：${Object.keys(CONFIG_KEYS).join(' | ')}`);
       print(showValue(readConfig(env).values[key]));
       return 0;
     }
@@ -394,22 +438,23 @@ function cmdConfig(args, { print, fail, env }) {
     return 2;
   }
   const { values, stored, warning, path } = readConfig(env);
+  const shown: Record<string, string | boolean> = values;
   if (warning) fail(`! ${warning}`);
   print(`設定ファイル：${path}`);
   for (const [k, spec] of Object.entries(CONFIG_KEYS)) {
     const mark = k in stored ? '*' : ' ';
     const options = spec.type === 'bool' ? 'on | off' : spec.choices.join(' | ');
-    print(`${mark} ${k.padEnd(7)}${showValue(values[k]).padEnd(10)}${spec.label}（${options}）`);
+    print(`${mark} ${k.padEnd(7)}${showValue(shown[k]).padEnd(10)}${spec.label}（${options}）`);
   }
   if (env.EXPLAIN_NO_OPEN && env.EXPLAIN_NO_OPEN !== '0') print('注意：環境変数 EXPLAIN_NO_OPEN が有効なため、open の設定より優先されます。');
   print('* はあなたが変更した値です。変更：explain config set <キー> <値>　既定値に戻す：explain config reset [キー]');
   return 0;
 }
 
-const ttsCacheDir = (env) => join(explainHome(env), 'cache', 'tts');
-const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const ttsCacheDir = (env: NodeJS.ProcessEnv): string => join(explainHome(env), 'cache', 'tts');
+const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
-function cmdCache(action, { print, fail, env }) {
+function cmdCache(action: string | undefined, { print, fail, env }: Omit<Context, 'cwd'>): number {
   const dir = ttsCacheDir(env);
   const { files, bytes } = cacheStats(dir);
   if (action === 'clear') {
@@ -427,7 +472,7 @@ function cmdCache(action, { print, fail, env }) {
   return 0;
 }
 
-function cmdList(print) {
+function cmdList(print: Print): void {
   print('テンプレート (template):');
   print('  sheet   図面ボード：英字の番号つきパネルをグリッドに並べる。1 画面で全体を見せる（既定）');
   print('  doc     1 段組の解説：上から順に読む。パネルが 3 枚以上なら目次がつく');
@@ -440,7 +485,7 @@ function cmdList(print) {
   print('\n部品の書き方：explain help <部品名>　原稿の書式：explain help format');
 }
 
-function cmdHelp(name, { print, fail }) {
+function cmdHelp(name: string | undefined, { print, fail }: Pick<Context, 'print' | 'fail'>): number {
   if (!name) return print(USAGE), 0;
   if (name === 'format') return print(FORMAT), 0;
   if (name === 'video') return print(VIDEO_FORMAT), 0;
@@ -453,13 +498,16 @@ function cmdHelp(name, { print, fail }) {
   return 0;
 }
 
-function slug(title) {
+function slug(title: string | undefined): string {
   const s = String(title || 'page').trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40);
   return s || 'page';
 }
 
-// -o があればそこへ、なければ EXPLAIN_HOME/<dir>/<題名>-<日時>.html へ書き、書いたパスを返す。
-function writeOutput(html, { dir, title, out, env, cwd }) {
+// Write to -o if given, otherwise to EXPLAIN_HOME/<dir>/<title>-<timestamp>.html, and return the written path.
+function writeOutput(
+  html: string,
+  { dir, title, out, env, cwd }: { dir: string; title?: string; out?: string; env: NodeJS.ProcessEnv; cwd?: string },
+): string {
   const file = out
     ? resolve(cwd ?? process.cwd(), out)
     : join(explainHome(env), dir, `${slug(title)}-${fileStamp()}.html`);
@@ -468,13 +516,17 @@ function writeOutput(html, { dir, title, out, env, cwd }) {
   return file;
 }
 
-function openFile(file) {
-  const [cmd, args] = process.platform === 'darwin' ? ['open', [file]]
+function openFile(file: string): void {
+  const [cmd, args]: [string, string[]] = process.platform === 'darwin' ? ['open', [file]]
     : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', file]]
       : ['xdg-open', [file]];
   try {
     spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   } catch {
-    // ブラウザを開けなくても成果物には影響しない。パスは表示済み。
+    // Failing to open a browser does not affect the output; the path is already printed.
   }
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }

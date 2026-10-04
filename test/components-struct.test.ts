@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPONENTS, ComponentError } from '../src/components/index.ts';
+import type { Component, RenderContext } from '../src/components/index.ts';
 import { niceScale } from '../src/components/limits.ts';
 
-const ctx = (args = '') => ({ args, uid: () => 'u1' });
-const render = (name, text, args) => COMPONENTS.get(name).render(text, ctx(args));
-const throwsAt = (fn, line) =>
+const ctx = (args = ''): RenderContext => ({ args, uid: () => 'u1' });
+const component = (name: string): Component => {
+  const c = COMPONENTS.get(name);
+  if (!c) throw new Error(`unknown component: ${name}`);
+  return c;
+};
+const render = (name: string, text: string, args?: string): string => component(name).render(text, ctx(args));
+const throwsAt = (fn: () => unknown, line: number): void =>
   assert.throws(fn, (e) => e instanceof ComponentError && e.line === line);
 
 const STE_TREE = `ASD-STE100 | Simplified Technical English

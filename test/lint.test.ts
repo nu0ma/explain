@@ -4,10 +4,11 @@ import { parseDoc } from '../src/parse.ts';
 import { readFileSync } from 'node:fs';
 import { lintDoc, splitSentences, sentenceLength, formatWarning } from '../src/lint/ste.ts';
 import { aiScore, boldProblems } from '../src/lint/yomiyasu.ts';
+import type { LintWarning } from '../src/lint/yomiyasu.ts';
 import { renderDoc } from '../src/render.ts';
 
-const lint = (body) => lintDoc(parseDoc(body));
-const rules = (ws) => ws.map((w) => w.rule);
+const lint = (body: string) => lintDoc(parseDoc(body));
+const rules = (ws: LintWarning[]) => ws.map((w) => w.rule);
 
 test('splitSentences: 「。！？」で区切り、閉じ括弧は前の文に含める', () => {
   const cases = [
@@ -136,10 +137,10 @@ test('formatWarning: 行番号・規則・内容・言い換え', () => {
   assert.equal(s, 'L4 [verbose] 冗長な表現「確認を行う」（を行う） → 確認する');
 });
 
-// yomiyasu（https://github.com/nanaism/yomiyasu）から移植した検査。期待値は yomiyasu v1.0.5 の
-// scripts/yomiyasu_lint.py で同じ文を検査した結果に合わせている。
+// Checks ported from yomiyasu (https://github.com/nanaism/yomiyasu). Expected values match the results of running
+// scripts/yomiyasu_lint.py from yomiyasu v1.0.5 on the same text.
 
-// yomiyasu の README の「比較例1」の修正前の文。
+// The "before" text of 「比較例1」 in yomiyasu's README.
 const YOMIYASU_BEFORE = `ここで**重要なのは、単なるパーツの共通化ではなく、組織の意思決定OSとしてのガバナンス**です。
 
 従来の開発では、画面ごとに手触り感を探りながらパーツを作っていました。しかし、片方だけを見て画面を作ると、もう片方のアクセシビリティが**静かに壊れます**。そこでデザインシステムという**強固な土台**を置くことで、開発者の**解像度が一段上がります**。
@@ -151,7 +152,7 @@ const YOMIYASU_BEFORE = `ここで**重要なのは、単なるパーツの共�
 `;
 
 const AI_RULES = new Set(['slop-word', 'metaphor-verb', 'filler', 'negative-parallel', 'emoji', 'redundant-bracket', 'halfwidth-space', 'trailing-colon', 'sentence-end-repeat', 'excess-bold', 'excess-list', 'bold-not-rendered']);
-const aiFindings = (src) => lint(src).filter((w) => AI_RULES.has(w.rule)).map((w) => `${w.line}:${w.rule}`);
+const aiFindings = (src: string) => lint(src).filter((w) => AI_RULES.has(w.rule)).map((w) => `${w.line}:${w.rule}`);
 
 test('yomiyasu：README の修正前の文で、yomiyasu と同じ指摘とスコアを出す', () => {
   const ws = lint(YOMIYASU_BEFORE).filter((w) => AI_RULES.has(w.rule));
@@ -217,11 +218,12 @@ test('yomiyasu：太字にならない ** は直し方の案つきで出す', ()
 });
 
 test('yomiyasu：太字の fixture（yomiyasu の tests/fixtures/bold_regressions.json）の全 50 件', () => {
-  const cases = JSON.parse(readFileSync(new URL('./fixtures/yomiyasu/bold_regressions.json', import.meta.url), 'utf8'));
+  type BoldCase = { id: string; text: string; expected_bold_problems: number | null; expected_line_numbers: number[] };
+  const cases: BoldCase[] = JSON.parse(readFileSync(new URL('./fixtures/yomiyasu/bold_regressions.json', import.meta.url), 'utf8'));
   assert.equal(cases.length, 50);
   for (const { id, text, expected_bold_problems: wantCount, expected_line_numbers: wantLines } of cases) {
     const got = boldProblems(text);
-    // 件数が null のものはブロックの境界の例。ブロックをまたぐ直し方の案を出さないことだけを確かめる（yomiyasu と同じ）。
+    // A null count marks a block-boundary case; only check that no fix spanning blocks is suggested (same as yomiyasu).
     if (wantCount === null) {
       assert.equal(got.some((p) => p.suggest), false, id);
       continue;
@@ -234,7 +236,7 @@ test('yomiyasu：太字の fixture（yomiyasu の tests/fixtures/bold_regression
 test('yomiyasu：参考（info）の指摘は strict でも生成を止めない。スコアは warn を 5 点、info を 2 点引く', () => {
   assert.doesNotThrow(() => renderDoc('---\nstyle: strict\n---\n## A\n速さではなく正しさを選ぶ。\n'));
   assert.throws(() => renderDoc('---\nstyle: strict\n---\n## A\n手触りを確かめる。\n'), /STE 検査で警告が 1 件/);
-  const cases = [
+  const cases: { req: Partial<LintWarning>[]; want: number }[] = [
     { req: [], want: 100 },
     { req: [{ severity: 'warn' }, { severity: 'error' }, { severity: 'info' }], want: 88 },
     { req: [{ rule: 'sentence-length' }], want: 100 },

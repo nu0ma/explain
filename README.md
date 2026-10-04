@@ -13,7 +13,7 @@ A CLI that turns a Markdown script into a self-contained, single-file explainer 
 
 ```sh
 pnpm install
-pnpm add --global "$PWD"      # installs the explain command (or run node bin/explain.js)
+pnpm add --global "$PWD"      # installs the explain command (or run node bin/explain.ts)
 
 explain render script.md                            # build an explainer page and open it in the browser
 explain render script.md --static                   # build HTML without <script>
@@ -27,7 +27,7 @@ explain cache [clear]                               # show (or clear) the narrat
 ```
 
 - Output goes to `~/.explain-cli/pages/` and `~/.explain-cli/videos/`; settings live in `~/.explain-cli/config.json`. Set `EXPLAIN_HOME` to change the location.
-- `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 22.13 or later.
+- `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 24.21 or later. The sources are TypeScript and run directly on Node without a build step.
 - Video narration is synthesized only with macOS `say`, using a Japanese voice (Kyoko, Eddy, Flo, or Reed, in that order). No external TTS service or API key is used. On other platforms, use `--voice off` for a subtitles-only video.
 
 ## Rewriting AI-style Japanese

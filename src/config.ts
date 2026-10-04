@@ -1,6 +1,6 @@
-// ユーザー設定：~/.explain-cli/config.json（EXPLAIN_HOME で場所を変えられる）。
-// 保存するのはユーザーが明示的に設定したキーだけ。読み込み時に既定値と合わせる。
-// ファイルが壊れていたり値が不正だったりしても既定値に戻し、設定の問題で描画を止めない。
+// User settings: ~/.explain-cli/config.json (EXPLAIN_HOME changes the location).
+// Only keys the user set explicitly are stored; they are merged with the defaults on read.
+// A broken file or an invalid value falls back to the default, so settings never stop a render.
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -9,14 +9,27 @@ import { CHOICES } from './parse.ts';
 import { VOICES } from './video/tts.ts';
 
 export class ConfigError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'ConfigError';
   }
 }
 
-/** @type {Readonly<Record<string, { type: 'bool' | 'enum', choices?: readonly string[], default: string | boolean, label: string }>>} */
-export const CONFIG_KEYS = Object.freeze({
+export type ConfigSpec =
+  | { type: 'bool'; default: boolean; label: string }
+  | { type: 'enum'; choices: readonly string[]; default: string; label: string };
+
+export type ConfigKey = 'open' | 'theme' | 'mode' | 'style' | 'voice';
+
+export type ConfigValues = { open: boolean; theme: string; mode: string; style: string; voice: string };
+
+export type ConfigValue = ConfigValues[ConfigKey];
+
+export type StoredConfig = Record<string, unknown>;
+
+export type Config = { values: ConfigValues; stored: StoredConfig; warning?: string; path: string };
+
+export const CONFIG_KEYS: Readonly<Record<ConfigKey, ConfigSpec>> = Object.freeze({
   open: { type: 'bool', default: true, label: '生成後にブラウザでページを開く' },
   theme: { type: 'enum', choices: CHOICES.theme, default: 'blueprint', label: '既定のテーマ' },
   mode: { type: 'enum', choices: CHOICES.mode, default: 'auto', label: '既定の配色' },
@@ -24,21 +37,25 @@ export const CONFIG_KEYS = Object.freeze({
   voice: { type: 'enum', choices: VOICES, default: 'say', label: '動画のナレーション音声（say：macOSのsayで読み上げる、off：字幕だけ）' },
 });
 
+export function isConfigKey(key: string): key is ConfigKey {
+  return key in CONFIG_KEYS;
+}
+
 const TRUE = new Set(['on', 'true', 'yes', '1', 'オン']);
 const FALSE = new Set(['off', 'false', 'no', '0', 'オフ']);
 
-export function explainHome(env = process.env) {
+export function explainHome(env: NodeJS.ProcessEnv = process.env): string {
   return env.EXPLAIN_HOME || join(homedir(), '.explain-cli');
 }
 
-export function configPath(env = process.env) {
+export function configPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(explainHome(env), 'config.json');
 }
 
-const defaults = () => Object.fromEntries(Object.entries(CONFIG_KEYS).map(([k, s]) => [k, s.default]));
+const defaults = (): Record<string, ConfigValue> => Object.fromEntries(Object.entries(CONFIG_KEYS).map(([k, s]) => [k, s.default]));
 
-function coerce(key, raw) {
-  const spec = CONFIG_KEYS[key];
+function coerce(key: string, raw: unknown): ConfigValue {
+  const spec = isConfigKey(key) ? CONFIG_KEYS[key] : undefined;
   if (!spec) throw new ConfigError(`設定項目 "${key}" はありません。使える項目：${Object.keys(CONFIG_KEYS).join(' | ')}`);
   if (spec.type === 'bool') {
     if (typeof raw === 'boolean') return raw;
@@ -52,32 +69,33 @@ function coerce(key, raw) {
   return v;
 }
 
-function readStored(env) {
+function readStored(env: NodeJS.ProcessEnv): { stored: StoredConfig; warning?: string } {
   const file = configPath(env);
   if (!existsSync(file)) return { stored: {} };
   try {
-    const data = JSON.parse(readFileSync(file, 'utf8'));
-    return { stored: data && typeof data === 'object' && !Array.isArray(data) ? data : {} };
+    const data: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    return { stored: data && typeof data === 'object' && !Array.isArray(data) ? (data as StoredConfig) : {} };
   } catch (e) {
-    return { stored: {}, warning: `${file} を読めないため、既定の設定を使います（${e.message}）` };
+    return { stored: {}, warning: `${file} を読めないため、既定の設定を使います（${e instanceof Error ? e.message : String(e)}）` };
   }
 }
 
-export function readConfig(env = process.env) {
+export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const { stored, warning } = readStored(env);
   const values = defaults();
   for (const [k, v] of Object.entries(stored)) {
-    if (!CONFIG_KEYS[k]) continue;
+    if (!isConfigKey(k)) continue;
     try {
       values[k] = coerce(k, v);
     } catch {
-      // 不正な値は既定値のままにする。
+      // Keep the default for an invalid value.
     }
   }
-  return { values, stored, warning, path: configPath(env) };
+  // defaults() and coerce() fill every key with a value of the type its spec declares.
+  return { values: values as ConfigValues, stored, warning, path: configPath(env) };
 }
 
-function writeStored(stored, env) {
+function writeStored(stored: StoredConfig, env: NodeJS.ProcessEnv): void {
   const file = configPath(env);
   if (!Object.keys(stored).length) {
     rmSync(file, { force: true });
@@ -87,15 +105,15 @@ function writeStored(stored, env) {
   writeFileSync(file, `${JSON.stringify(stored, null, 2)}\n`);
 }
 
-export function setConfig(key, raw, env = process.env) {
+export function setConfig(key: string, raw: unknown, env: NodeJS.ProcessEnv = process.env): ConfigValue {
   const value = coerce(key, raw);
   const { stored } = readStored(env);
   writeStored({ ...stored, [key]: value }, env);
   return value;
 }
 
-export function resetConfig(key, env = process.env) {
-  if (key !== undefined && !CONFIG_KEYS[key]) coerce(key, '');
+export function resetConfig(key?: string, env: NodeJS.ProcessEnv = process.env): void {
+  if (key !== undefined && !isConfigKey(key)) coerce(key, '');
   const { stored } = readStored(env);
   const next = key === undefined ? {} : Object.fromEntries(Object.entries(stored).filter(([k]) => k !== key));
   writeStored(next, env);

@@ -1,6 +1,7 @@
 import { md } from '../markdown.ts';
 import { esc } from '../svg/text.ts';
 import { ComponentError } from './error.ts';
+import type { Component } from './types.ts';
 
 const KINDS = new Set(['info', 'ok', 'warn', 'err']);
 
@@ -21,4 +22,4 @@ export default {
     const body = text.trim() ? `<div class="am-callout-body am-md">${md(text)}</div>` : '';
     return `<div class="am-callout am-callout--${kind}" role="note">${head}${body}</div>`;
   },
-};
+} satisfies Component;

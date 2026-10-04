@@ -1,18 +1,41 @@
-// 原稿 → 1 ファイルの HTML。流れ：parse → STE 検査 → パネルを描画（Markdown / 部品 / raw）→ テンプレートに当てはめる → CSS とランタイムをインライン化。
+// Script -> single-file HTML. Pipeline: parse -> STE check -> render panels (Markdown / components / raw) -> apply the template -> inline CSS and runtime.
 
 import { parseDoc, applyOverrides, ParseError } from './parse.ts';
+import type { Block, FenceBlock, Meta, MetaValue, ParseDocOptions } from './parse.ts';
 import { md } from './markdown.ts';
 import { COMPONENTS, RAW_LANGS, ComponentError } from './components/index.ts';
 import { TEMPLATES } from './templates/index.ts';
 import { pageCss } from './themes/index.ts';
 import { lintDoc, blockingWarnings } from './lint/ste.ts';
+import type { LintWarning } from './lint/ste.ts';
 import { esc } from './svg/text.ts';
 import { VERSION, RUNTIME_JS } from './assets.ts';
 import { timestamp } from './time.ts';
 
+export type RenderErrorInfo = { line?: number; component?: string; example?: string };
+
+// Per-render counters: panel count and how many times each component was used.
+export type RenderStats = { panels: number; components: Record<string, number> };
+
+// Shared across all blocks of one page: seq numbers SVG ids so they stay unique on the page.
+export type RenderBlocksContext = { seq: number; stats: RenderStats };
+
+export type RenderOverrides = Readonly<Record<string, MetaValue | undefined>>;
+
+export type RenderResult = {
+  html: string;
+  warnings: LintWarning[];
+  stats: RenderStats;
+  meta: Meta;
+  static: boolean;
+};
+
 export class RenderError extends Error {
-  /** @param {string} message @param {{ line?: number, component?: string, example?: string }} [info] */
-  constructor(message, { line, component, example } = {}) {
+  line: number | undefined;
+  component: string | undefined;
+  example: string | undefined;
+
+  constructor(message: string, { line, component, example }: RenderErrorInfo = {}) {
     super(message);
     this.name = 'RenderError';
     this.line = line;
@@ -22,39 +45,48 @@ export class RenderError extends Error {
 }
 
 export class LintError extends Error {
-  constructor(warnings) {
+  warnings: LintWarning[];
+
+  constructor(warnings: LintWarning[]) {
     super(`STE 検査で警告が ${warnings.length} 件あります（style: strict）`);
     this.name = 'LintError';
     this.warnings = warnings;
   }
 }
 
-// ページ上のボタンの文言。
-export const UI = Object.freeze({
+type UiLabels = {
+  theme: Readonly<Record<string, string>>;
+  mode: Readonly<Record<string, string>>;
+  copy: string;
+  done: string;
+};
+
+// Labels for the buttons on the page.
+export const UI: Readonly<UiLabels> = Object.freeze({
   theme: { blueprint: 'テーマ：図面', shadcn: 'テーマ：カード' },
   mode: { auto: '配色：システムに合わせる', light: '配色：ライト', dark: '配色：ダーク' },
   copy: '原稿をコピー',
   done: 'コピーしました ✓',
 });
 
-// 静的出力に紛れ込んだ JavaScript を見つける（html ブロックや Markdown 中の生 HTML 由来）。
+// Detects JavaScript that slipped into static output (from html blocks or raw HTML in Markdown).
 const SCRIPT_LIKE = /<script\b|<[^>]+\son[a-z]+\s*=|javascript:/i;
 
-// overrides.static（--static）か frontmatter の static: true で、<script> を含まない HTML を出す。
-export function renderDoc(source, overrides = {}, defaults = {}) {
+// overrides.static (--static) or frontmatter static: true produces HTML without <script>.
+export function renderDoc(source: string, overrides: RenderOverrides = {}, defaults: ParseDocOptions['defaults'] = {}): RenderResult {
   const doc = parseDoc(source, { defaults });
   const { static: staticFlag, ...rest } = overrides;
   applyOverrides(doc.meta, rest);
   if (doc.meta.template === 'video') throw new ParseError('template: video は動画の原稿です。explain video で作ってください', 0);
   const isStatic = staticFlag === true || doc.meta.static === 'true';
-  // 静的出力は JS で配色を切り替えられないので、OS の設定（prefers-color-scheme）に従わせる。
+  // Static output cannot switch colors with JS, so it follows the OS setting (prefers-color-scheme).
   if (isStatic) doc.meta.mode = 'auto';
 
   const warnings = doc.meta.style === 'off' ? [] : lintDoc(doc);
   if (doc.meta.style === 'strict' && blockingWarnings(warnings).length) throw new LintError(blockingWarnings(warnings));
 
-  const stats = { panels: doc.panels.length, components: {} };
-  const ctx = { seq: 0, stats };
+  const stats: RenderStats = { panels: doc.panels.length, components: {} };
+  const ctx: RenderBlocksContext = { seq: 0, stats };
   const introHtml = renderBlocks(doc.intro, ctx);
   const panels = doc.panels.map((p) => ({ ...p, html: renderBlocks(p.blocks, ctx) }));
   const body = TEMPLATES[doc.meta.template]({ meta: doc.meta, introHtml, panels });
@@ -65,11 +97,11 @@ export function renderDoc(source, overrides = {}, defaults = {}) {
   return { html, warnings, stats, meta: doc.meta, static: isStatic };
 }
 
-export function renderBlocks(blocks, ctx) {
+export function renderBlocks(blocks: readonly Block[], ctx: RenderBlocksContext): string {
   return blocks.map((b) => (b.type === 'md' ? `<div class="am-md">${md(b.text)}</div>` : renderFence(b, ctx))).join('\n');
 }
 
-function renderFence(block, ctx) {
+function renderFence(block: FenceBlock, ctx: RenderBlocksContext): string {
   const { lang, args, text, line } = block;
   if (RAW_LANGS.has(lang)) return text;
   const comp = COMPONENTS.get(lang);
@@ -89,7 +121,7 @@ function renderFence(block, ctx) {
   }
 }
 
-function shell({ meta, body, source, isStatic }) {
+function shell({ meta, body, source, isStatic }: { meta: Meta; body: string; source: string; isStatic: boolean }): string {
   const toolbar = isStatic ? '' : `<div class="am-toolbar">
 <button class="am-btn" type="button" data-am="theme" data-labels="${esc(JSON.stringify(UI.theme))}">${esc(UI.theme[meta.theme])}</button>
 <button class="am-btn" type="button" data-am="mode" data-labels="${esc(JSON.stringify(UI.mode))}">${esc(UI.mode[meta.mode])}</button>

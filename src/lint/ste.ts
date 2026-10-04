@@ -1,54 +1,71 @@
-// STE（Simplified Technical English）の考え方を日本語に当てはめた文章検査。原稿の説明文だけを対象にする。
-// 規則：文の長さ、段落の文の数、冗長な動詞句、ぼかし表現、強調・誇張、「の」の連続。すべて警告で、厳しさは style で決める。
-// AI が書いた日本語に多い書き方も検査する（yomiyasu から移植した規則。yomiyasu.js）。info の指摘は strict でも生成を止めない。
-// 対象外：コードとインラインコード、~~取り消し線~~（悪い例の提示）、状態が no の表の行、見出し、callout 以外の部品。
+// Prose checks that apply the ideas of STE (Simplified Technical English) to Japanese. Only the manuscript's prose is checked.
+// Rules: sentence length, sentences per paragraph, verbose verb phrases, hedging, emphasis/exaggeration, and chains of 「の」.
+// All are warnings; strictness is set by style.
+// Also checks patterns common in AI-written Japanese (rules ported from yomiyasu; see yomiyasu.ts). info findings do not
+// block generation even with strict.
+// Skipped: code and inline code, ~~strikethrough~~ (bad examples), table rows with status no, headings, components other than callout.
 
 import { JA_VERBOSE, JA_HEDGES, JA_EMPHASIS } from './wordlist.ja.ts';
 import { checkLine, checkEmoji, checkHeading, checkSentenceEnds, checkMetrics, checkBold } from './yomiyasu.ts';
+import type { LintWarning, Sentence, TextMetrics } from './yomiyasu.ts';
+import type { Block, ParsedDoc } from '../parse.ts';
 import { isCJK } from '../svg/text.ts';
 
-export const LIMITS = Object.freeze({ procedural: 35, descriptive: 45 });
+export type { LintRule, LintWarning, Severity } from './yomiyasu.ts';
+
+/** Sentence kind; procedural (numbered list items) has a stricter length limit. */
+export type SentenceKind = 'procedural' | 'descriptive';
+
+/** A lexical finding before the line number is attached; `index` orders findings within a unit. */
+type LexicalFinding = Omit<LintWarning, 'line' | 'severity'> & { index: number };
+
+interface LintContext {
+  sentences: Sentence[];
+  metrics: TextMetrics;
+}
+
+export const LIMITS: Readonly<Record<SentenceKind, number>> = Object.freeze({ procedural: 35, descriptive: 45 });
 export const MAX_SENTENCES = 6;
-const NO_CHAIN_MIN = 3; // 「の」が 3 回（A の B の C の D）以上で警告する
+const NO_CHAIN_MIN = 3; // warn on 3 or more 「の」 (A の B の C の D)
 
 const PUNCT = /[，。！？；：、（）「」『』“”‘’《》【】・…〜\u3000]/;
 const WORD = /[A-Za-z0-9_][\w'’./-]*/g;
-// 名詞句の 1 要素：空白・句読点・括弧・主な助詞を含まない文字の並び。
+// One element of a noun phrase: a run of characters without whitespace, punctuation, brackets or common particles.
 const ELEMENT = '[^\\s、。，．！？「」『』（）()\\[\\]・:：,.をはがにでへもやとの]+';
 const NO_CHAIN = new RegExp(`(?:${ELEMENT}の){${NO_CHAIN_MIN},}${ELEMENT}`, 'g');
 const NOUN_BEFORE = /([一-鿿゠-ヿ々A-Za-z0-9]+)$/;
 const GUESS = /推測[：:]/;
 const EMPHASIS_RE = JA_EMPHASIS.map((e) => ({
   ...e,
-  // 「大変更」「大変化」「大変動」は誇張ではないので除く。
+  // 「大変更」「大変化」「大変動」 are not exaggeration, so exclude them.
   re: new RegExp(e.word === '大変' ? '大変(?![更化動])' : e.word, 'g'),
 }));
 
-// 文に分ける。区切りは「。！？」（閉じ括弧は前の文に含める）。改行での区切りは呼び出し側が行ごとに渡して実現する。
-export function splitSentences(text) {
+// Splits text into sentences on 。！？ (closing brackets stay with the preceding sentence). Callers split on newlines by passing one line at a time.
+export function splitSentences(text: unknown): string[] {
   const parts = String(text).match(/[^。！？]+(?:[。！？]+[」』）)]*|$)|[。！？]+/g) ?? [];
   return parts.map((s) => s.trim()).filter((s) => s && !/^[。！？」』）)]+$/.test(s));
 }
 
-// 文の長さ。全角文字は句読点を除いて 1 字、英単語・数字・識別子は 1 語を 1 字と数える。
-export function sentenceLength(sentence) {
+// Sentence length: each full-width character (excluding punctuation) counts as 1, and each English word, number or identifier counts as 1.
+export function sentenceLength(sentence: string): number {
   const cjk = [...sentence].filter((c) => isCJK(c) && !PUNCT.test(c)).length;
   const words = sentence.match(WORD)?.length ?? 0;
   return cjk + words;
 }
 
-export function formatWarning(w) {
+export function formatWarning(w: Omit<LintWarning, 'suggestion'> & { suggestion?: string }): string {
   return `L${w.line} [${w.rule}]${w.severity === 'info' ? '（参考）' : ''} ${w.message}${w.suggestion ? ` → ${w.suggestion}` : ''}`;
 }
 
-// style: strict で生成を止める警告（参考の info は除く）。
-export const blockingWarnings = (warnings) => warnings.filter((w) => w.severity !== 'info');
+// Warnings that block generation with style: strict (excluding info).
+export const blockingWarnings = (warnings: readonly LintWarning[]): LintWarning[] => warnings.filter((w) => w.severity !== 'info');
 
-export function lintDoc(doc) {
-  const warnings = [];
-  // 文書全体で見る規則（文末の繰り返し、太字と箇条書きの頻度）のための集計。
-  const ctx = { sentences: [], metrics: { chars: 0, lines: 0, listLines: 0, bold: 0 } };
-  const lintBlocks = (blocks) => {
+export function lintDoc(doc: ParsedDoc): LintWarning[] {
+  const warnings: LintWarning[] = [];
+  // Aggregates for document-wide rules (sentence-end repetition, bold and list frequency).
+  const ctx: LintContext = { sentences: [], metrics: { chars: 0, lines: 0, listLines: 0, bold: 0 } };
+  const lintBlocks = (blocks: readonly Block[]) => {
     for (const b of blocks) {
       if (b.type !== 'md' && b.lang !== 'callout') continue;
       const start = b.type === 'md' ? b.line : b.line + 1;
@@ -67,12 +84,12 @@ export function lintDoc(doc) {
     lintBlocks(p.blocks);
   }
   warnings.push(...checkSentenceEnds(ctx.sentences), ...checkMetrics(ctx.metrics));
-  // 行番号の順に並べる（同じ行の中は検査した順のまま）。
-  return warnings.map((w, i) => [w, i]).sort((a, b) => a[0].line - b[0].line || a[1] - b[1]).map(([w]) => w);
+  // Sort by line number (within a line, keep the order in which checks ran).
+  return warnings.map((w, i) => [w, i] as const).sort((a, b) => a[0].line - b[0].line || a[1] - b[1]).map(([w]) => w);
 }
 
-// 太字と箇条書きの頻度の集計（yomiyasu の analyze_markdown_metrics）。引用・表・画像・HTML の行は数えない。
-function countPlain(raw, m) {
+// Counts for bold and list frequency (yomiyasu's analyze_markdown_metrics). Quote, table, image and HTML lines are not counted.
+function countPlain(raw: string, m: TextMetrics): void {
   const t = raw.trim();
   if (/^(>|\||!\[|\[!\[|<)/.test(t)) return;
   if (t) m.lines++;
@@ -81,8 +98,9 @@ function countPlain(raw, m) {
   m.chars += Array.from(raw.replace(/\s+/g, '')).length;
 }
 
-// 文末の繰り返しを見る地の文（yomiyasu の extract_plain_sentences）。見出し・表・引用・リスト・字下げの行は除く。
-function collectSentences(raw, line, ctx) {
+// Collects body sentences for the sentence-end repetition check (yomiyasu's extract_plain_sentences).
+// Heading, table, quote, list and indented lines are skipped.
+function collectSentences(raw: string, line: number, ctx: LintContext): void {
   const t = raw.trim();
   if (!t || /^(#|\||!\[|\[!\[|<|>)/.test(t) || /^[-*+]\s|^\d+\.\s/.test(t) || /^( {2}|\t)/.test(raw)) return;
   for (const s of t.split(/(?<=[。！？])/)) {
@@ -91,7 +109,7 @@ function collectSentences(raw, line, ctx) {
   }
 }
 
-function clean(text) {
+function clean(text: string): string {
   return text
     .replace(/~~[^~]*~~/g, '')
     .replace(/`[^`]*`/g, '')
@@ -101,8 +119,8 @@ function clean(text) {
     .replace(/[*_]{1,3}/g, '');
 }
 
-function lintMarkdown(text, startLine, out, ctx) {
-  let para = null;
+function lintMarkdown(text: string, startLine: number, out: LintWarning[], ctx: LintContext): void {
+  let para: { line: number; count: number } | null = null;
   const flush = () => {
     if (para && para.count > MAX_SENTENCES) {
       out.push({ line: para.line, rule: 'paragraph-length', message: `段落が ${para.count} 文あります（上限 ${MAX_SENTENCES}）`, suggestion: '段落を分けるか、リストにする' });
@@ -154,10 +172,10 @@ function lintMarkdown(text, startLine, out, ctx) {
   flush();
 }
 
-const preview = (s) => (s.length > 24 ? `${s.slice(0, 24)}…` : s);
+const preview = (s: string): string => (s.length > 24 ? `${s.slice(0, 24)}…` : s);
 
-// 1 単位の文字列（リスト項目・セル・段落の 1 行）を検査し、文の数を返す。
-function checkUnit(text, line, kind, guess, out) {
+// Checks one unit of text (a list item, a cell, or one line of a paragraph) and returns its sentence count.
+function checkUnit(text: string, line: number, kind: SentenceKind, guess: boolean, out: LintWarning[]): number {
   const sentences = splitSentences(text);
   for (const s of sentences) {
     const count = sentenceLength(s);
@@ -175,10 +193,10 @@ function checkUnit(text, line, kind, guess, out) {
   return sentences.length;
 }
 
-// 冗長な動詞句。長い句から照合し、すでに照合した範囲と重なるものは数えない。
-function verbose(text) {
-  const taken = [];
-  const found = [];
+// Verbose verb phrases. Longer phrases are matched first; matches overlapping an already matched range are not counted.
+function verbose(text: string): LexicalFinding[] {
+  const taken: [start: number, end: number][] = [];
+  const found: LexicalFinding[] = [];
   for (const { re, label, fix } of JA_VERBOSE) {
     for (const m of text.matchAll(re)) {
       const start = m.index;
@@ -192,13 +210,13 @@ function verbose(text) {
   return found;
 }
 
-function hedges(text) {
+function hedges(text: string): LexicalFinding[] {
   return JA_HEDGES.flatMap(({ re, label }) => [...text.matchAll(re)].map((m) => ({
     index: m.index, rule: 'hedge', message: `ぼかし表現「${m[0]}」（${label}）`, suggestion: '言い切るか根拠を書く。推測なら行に「推測：」と書く',
   })));
 }
 
-function emphasis(text) {
+function emphasis(text: string): LexicalFinding[] {
   return EMPHASIS_RE.flatMap(({ re, word, fix }) => [...text.matchAll(re)].map((m) => ({
     index: m.index, rule: 'emphasis', message: `強調・誇張「${word}」`, suggestion: fix,
   })));

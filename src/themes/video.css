@@ -1,5 +1,5 @@
-/* 動画の再生ページ：1920×1080 の舞台をウィンドウに合わせて等比で拡大縮小する。色はすべてテーマ変数から取る。
-   blueprint / shadcn はページのテーマをそのまま使う。3b1b は動画専用のダークテーマ（濃い背景、青い線、黄色の強調）。 */
+/* Video player page: the 1920×1080 stage scales uniformly to fit the window. All colors come from theme variables.
+   blueprint / shadcn reuse the page themes. 3b1b is a video-only dark theme (dark background, blue lines, yellow highlights). */
 html[data-video] {
   --v-stage: var(--bg);
   --v-cap-fg: var(--ink); --v-cap-bg: var(--paper); --v-cap-border: var(--line);
@@ -21,7 +21,7 @@ html[data-video][data-theme="3b1b"] {
   --v-title-font: "CMU Serif", "Latin Modern Roman", "Iowan Old Style", "Palatino", "Songti SC", "STSong", "Noto Serif CJK SC", serif;
   --v-glow: drop-shadow(0 0 6px rgba(247, 217, 111, 0.55));
 }
-/* blueprint：図面の地に細かい方眼を重ねる */
+/* blueprint: overlay a fine grid on the drawing background */
 html[data-video][data-theme="blueprint"] {
   --v-stage: linear-gradient(var(--line-2) 1px, transparent 1px) 0 0 / 40px 40px,
              linear-gradient(90deg, var(--line-2) 1px, transparent 1px) 0 0 / 40px 40px, var(--paper);
@@ -50,7 +50,7 @@ html[data-video] body { font-size: 22px; }
 .amv-ghost { position: absolute; left: 0; top: 0; transform-origin: 0 0; margin: 0; }
 .amv-ghost svg { display: block; max-width: none; overflow: visible; }
 
-/* ── 図面の外枠（blueprint）── */
+/* ── Drawing frame (blueprint) ── */
 .amv-sheet { display: none; }
 html[data-theme="blueprint"] .amv-sheet {
   display: block; position: absolute; inset: 24px; border: 1.5px solid var(--line); pointer-events: none;
@@ -69,7 +69,7 @@ html[data-theme="blueprint"] .amv-sheet::before {
 .amv-ruler--top span + span, .amv-ruler--bottom span + span { border-left: 1px solid var(--line); }
 .amv-ruler--left span + span, .amv-ruler--right span + span { border-top: 1px solid var(--line); }
 
-/* ── 場面 ── */
+/* ── Scenes ── */
 .amv-scene { position: absolute; inset: 0; visibility: hidden; }
 .amv-scene-head {
   position: absolute; left: 72px; right: 72px; top: 72px; height: 64px; visibility: hidden;
@@ -84,7 +84,7 @@ html[data-theme="blueprint"] .amv-sheet::before {
 .amv-scene-meta { display: flex; align-items: center; padding: 0 22px; font: 16px var(--font-mono); color: var(--ink-2); letter-spacing: 0.06em; }
 html[data-theme="shadcn"] .amv-scene-n { margin: 12px 0 12px 14px; min-width: 40px; border-radius: 8px; font-size: 22px; }
 html[data-theme="shadcn"] .amv-scene-head { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); }
-/* 3b1b：題名を左上に浮かせ、枠をつけない */
+/* 3b1b: float the title at the top left, with no frame */
 html[data-theme="3b1b"] .amv-scene-head { left: 96px; top: 56px; border: 0; background: none; align-items: baseline; gap: 22px; }
 html[data-theme="3b1b"] .amv-scene-n { background: none; color: var(--line); padding: 0; min-width: 0; font: 500 30px var(--font-mono); }
 html[data-theme="3b1b"] .amv-scene-title { padding: 0; font-weight: 400; font-size: 46px; }
@@ -98,7 +98,7 @@ html[data-theme="3b1b"] .amv-scene-meta { display: none; }
 .amv-fit table { font-size: 24px; }
 .amv-fit th { font-size: 17px; }
 
-/* ── タイトル画面 ── */
+/* ── Title screen ── */
 .amv-scene--title { display: grid; place-items: center; text-align: center; }
 .amv-title-wrap { max-width: 1500px; display: flex; flex-direction: column; align-items: center; }
 .amv-title { margin: 0; font: 700 96px/1.15 var(--v-title-font); color: var(--ink); letter-spacing: -0.01em; }
@@ -116,7 +116,7 @@ html[data-theme="3b1b"] .amv-title { font-weight: 400; font-size: 104px; letter-
 html[data-theme="3b1b"] .amv-subtitle { color: var(--line); }
 html[data-theme="3b1b"] .amv-titleblock { display: none; }
 
-/* ── 字幕 ── */
+/* ── Subtitles ── */
 .amv-caption {
   position: absolute; left: 0; right: 0; bottom: 76px; display: flex; justify-content: center; pointer-events: none;
 }
@@ -130,7 +130,7 @@ html[data-theme="3b1b"] .amv-caption span { text-shadow: 0 2px 8px rgba(0, 0, 0,
 .amv-caption span:empty { display: none; }
 .amv-caption b { color: var(--accent); font-weight: 700; }
 
-/* ── ナレーションで名前を呼ばれたときの強調。矢印のラベルはふだん灰色で、呼ばれたときだけ色を変える ── */
+/* ── Highlight when the narration names an element. Arrow labels are normally gray and change color only when named ── */
 html[data-video] .am-diagram .am-edge-label text { fill: var(--ink-2); }
 .amv-hl .am-node-shape, .amv-hl .am-actor {
   stroke: var(--accent); stroke-width: 3; fill: var(--accent-bg); filter: var(--v-glow);
@@ -141,7 +141,7 @@ html[data-video] .am-diagram .amv-hl text, html[data-video] .am-diagram text.amv
   color: var(--accent); outline: 2.5px solid var(--accent); outline-offset: 4px; border-radius: 4px;
 }
 
-/* ── 再生コントロール（画面には入らない）── */
+/* ── Playback controls (not part of the frame) ── */
 .amv-bigplay {
   position: absolute; left: 50%; top: 50%; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.85); background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 54px; cursor: pointer;
@@ -160,7 +160,7 @@ html[data-video] .am-diagram .amv-hl text, html[data-video] .am-diagram text.amv
 .amv-marks i { position: absolute; top: 0; width: 2px; height: 6px; background: #58c4dd; }
 .amv-brand { color: #5b6576; font-size: 12px; white-space: nowrap; }
 
-/* 書き出しモード：舞台だけを残し、等倍で拡大縮小しない */
+/* Export mode: keep only the stage, at 1:1 with no scaling */
 html[data-export] .amv-controls, html[data-export] .amv-bigplay { display: none; }
 html[data-export] .amv-viewport { inset: 0; }
 html[data-export] .amv-stage { left: 0; top: 0; transform: none !important; }

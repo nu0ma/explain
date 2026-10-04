@@ -1,7 +1,19 @@
-// シーケンス図：参加者を横に並べ、メッセージを上から下へ描く。間隔はメッセージのラベル幅から決めるので、ラベルがつぶれない。
+// Sequence diagram: participants side by side, messages drawn top to bottom. Spacing is derived from message label widths so labels never get squeezed.
 import { esc, measure, wrap } from '../svg/text.ts';
 import { f, arrowDefs, svgOpen, textLines } from '../svg/shapes.ts';
 import { ComponentError, contentLines } from './error.ts';
+import type { Component } from './types.ts';
+
+export type SequenceMessage = { kind: 'msg'; from: string; to: string; dashed: boolean; label: string; line: number };
+export type SequenceNote = { kind: 'note'; over: string[]; text: string; line: number };
+export type SequenceDivider = { kind: 'divider'; text: string; line: number };
+export type SequenceStep = SequenceMessage | SequenceNote | SequenceDivider;
+export type SequenceModel = { participants: string[]; steps: SequenceStep[] };
+
+// Steps with their wrapped lines and resolved geometry.
+type PreparedStep =
+  | (SequenceMessage & { lines: string[]; a: number; b: number })
+  | ((SequenceNote | SequenceDivider) & { lines: string[]; w: number });
 
 const FS = 13;
 const LH = 16;
@@ -17,12 +29,12 @@ const RE = {
   msg: /^([^:：]+?)\s*(-->|->)\s*([^:：]+?)\s*(?:[:：]\s*(.*))?$/,
 };
 
-export function parseSequence(text) {
-  const participants = [];
-  const add = (p) => { if (!participants.includes(p)) participants.push(p); };
-  const steps = [];
+export function parseSequence(text: string): SequenceModel {
+  const participants: string[] = [];
+  const add = (p: string): void => { if (!participants.includes(p)) participants.push(p); };
+  const steps: SequenceStep[] = [];
   for (const { text: t, line } of contentLines(text)) {
-    let m;
+    let m: RegExpMatchArray | null;
     if ((m = t.match(RE.participants))) {
       m[1].split(/[,，]/).map((s) => s.trim()).filter(Boolean).forEach(add);
     } else if ((m = t.match(RE.note))) {
@@ -61,21 +73,23 @@ note A, C: 複数の参加者にまたがる注記
     const model = parseSequence(text);
     return `<figure class="am-diagram am-seq">${layout(model, { num: /\bnum\b/.test(args), id: uid() })}</figure>`;
   },
-};
+} satisfies Component;
 
-function layout({ participants: ps, steps }, { num, id }) {
+function layout({ participants: ps, steps }: SequenceModel, { num, id }: { num: boolean; id: string }): string {
   const idx = new Map(ps.map((p, i) => [p, i]));
+  // Every name in steps was added to participants by parseSequence, so the lookup always succeeds.
+  const indexOf = (p: string): number => idx.get(p) ?? 0;
   const actorW = ps.map((p) => Math.max(measure(p, FS) + 28, 84));
   const gaps = ps.slice(1).map((_, i) => (actorW[i] + actorW[i + 1]) / 2 + 28);
   let extraRight = 0;
   let extraLeft = 0;
 
-  const prepared = steps.map((s) => {
+  const prepared = steps.map((s): PreparedStep => {
     if (s.kind === 'msg') {
       const lines = s.label ? wrap(s.label, LABEL_MAX, FS) : [];
       const width = Math.max(0, ...lines.map((l) => measure(l, FS))) + (num ? 34 : 22);
-      const a = idx.get(s.from);
-      const b = idx.get(s.to);
+      const a = indexOf(s.from);
+      const b = indexOf(s.to);
       if (a === b) {
         if (a < gaps.length) gaps[a] = Math.max(gaps[a], width + 48);
         else extraRight = Math.max(extraRight, width + 40);
@@ -89,7 +103,7 @@ function layout({ participants: ps, steps }, { num, id }) {
     const lines = wrap(s.text, 220, 12);
     const w = Math.max(...lines.map((l) => measure(l, 12))) + 20;
     if (s.kind === 'note' && s.over.length === 1) {
-      const i = idx.get(s.over[0]);
+      const i = indexOf(s.over[0]);
       if (i === 0) extraLeft = Math.max(extraLeft, w / 2 - actorW[0] / 2);
       if (i === ps.length - 1) extraRight = Math.max(extraRight, w / 2 - actorW[i] / 2);
     }
@@ -97,10 +111,10 @@ function layout({ participants: ps, steps }, { num, id }) {
   });
 
   const xs = [MARGIN + extraLeft + actorW[0] / 2];
-  gaps.forEach((g) => xs.push(xs.at(-1) + g));
-  const width = xs.at(-1) + actorW.at(-1) / 2 + MARGIN + extraRight;
+  gaps.forEach((g) => xs.push(xs[xs.length - 1] + g));
+  const width = xs[xs.length - 1] + actorW[actorW.length - 1] / 2 + MARGIN + extraRight;
 
-  const body = [];
+  const body: string[] = [];
   let y = TOP + ACTOR_H + 22;
   let n = 0;
   for (const [k, s] of prepared.entries()) {
@@ -125,7 +139,7 @@ function layout({ participants: ps, steps }, { num, id }) {
         y += 24;
       }
     } else if (s.kind === 'note') {
-      const xsOver = s.over.map((p) => xs[idx.get(p)]);
+      const xsOver = s.over.map((p) => xs[indexOf(p)]);
       const lo = Math.min(...xsOver);
       const hi = Math.max(...xsOver);
       const w = Math.max(s.w, hi - lo + 40);

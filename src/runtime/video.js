@@ -2,9 +2,9 @@
   const D = JSON.parse(document.getElementById('amv-data').textContent);
   const W = 1920;
   const H = 1080;
-  const T = 0.9;     // 場面の切り替え時間。TIMING.transition と同じ値
-  const R = 0.6;     // 1 手順が現れるまでの時間
-  const CAM = 0.8;   // カメラの移動時間
+  const T = 0.9;     // scene transition time, same as TIMING.transition
+  const R = 0.6;     // time for one step to appear
+  const CAM = 0.8;   // camera move time
   const root = document.documentElement;
   const stage = document.querySelector('.amv-stage');
   const camera = document.querySelector('.amv-camera');
@@ -17,7 +17,7 @@
   const lerp = (a, b, p) => a + (b - a) * p;
   const STEP_SEL = '.am-tl-item, .am-lim, .am-seg, tbody tr, .am-kv-cell, .am-md > ul > li, .am-md > ol > li, .am-md > p, .am-md > blockquote, .am-callout';
 
-  // ── 1. 各場面の内容を画面に収める ──
+  // ── 1. Fit each scene's content to the screen ──
   for (const sc of scenes) {
     const fit = sc.querySelector('.amv-fit');
     if (!fit || !fit.children.length) continue;
@@ -25,14 +25,14 @@
     fit.style.transform = `scale(${s})`;
   }
 
-  // 場面の題名はカメラの外に置く。カメラが寄っても題名は動かない。
+  // Scene titles sit outside the camera, so they stay put when the camera zooms.
   const heads = scenes.map((sc) => {
     const h = sc.querySelector('.amv-scene-head');
     if (h) stage.insertBefore(h, camera.nextSibling);
     return h;
   });
 
-  // 舞台を座標系として要素を測る（このときカメラは恒等変換）。
+  // Measure elements in stage coordinates (the camera is the identity transform here).
   const sr = stage.getBoundingClientRect();
   const k = sr.width / W;
   const rectOf = (el) => {
@@ -40,7 +40,7 @@
     return { x: (r.left - sr.left) / k, y: (r.top - sr.top) / k, w: r.width / k, h: r.height / k };
   };
 
-  // ── 2. 手順に分ける：部品に data-step があればそれでまとめ、なければ行や項目ごとに自動で分ける ──
+  // ── 2. Split into steps: group by data-step when the component has it, otherwise split by line or item automatically ──
   const items = [];   // { el, at, paths: [{ el, len }] }
   scenes.forEach((sc, i) => {
     if (i === 0) return;
@@ -66,7 +66,7 @@
     const B = beats.length;
     const perBeat = new Map();
     groups.forEach((g, gi) => {
-      // ナレーションが手順より多いときは、余った文を前置きにし、手順を最後の数文にそろえる。
+      // With more narration than steps, the extra sentences become a preamble and the steps align with the last sentences.
       const b = S <= B ? gi + (B - S) : Math.floor((gi * B) / S);
       const rank = perBeat.get(b) ?? 0;
       perBeat.set(b, rank + 1);
@@ -82,7 +82,7 @@
     });
   });
 
-  // ── 3. 場面をまたぐ変形：前後の場面にある同じ名前（data-key）の要素 ──
+  // ── 3. Cross-scene morph: elements with the same name (data-key) in adjacent scenes ──
   const morphs = [];  // { scene, from, to, ghost, a, b }
   const keyed = (sc) => {
     const m = new Map();
@@ -93,14 +93,14 @@
     const prev = keyed(scenes[i - 1]);
     for (const [key, to] of keyed(scenes[i])) {
       const from = prev.get(key);
-      // 同じ種類の要素どうし（SVG と SVG、HTML と HTML）でだけ変形する。そうしないと形が合わない。
+      // Morph only between elements of the same kind (SVG to SVG, HTML to HTML); otherwise the shapes do not match.
       if (!from || (from instanceof SVGElement) !== (to instanceof SVGElement)) continue;
       try {
         const ghost = makeGhost(from);
         overlay.append(ghost.node);
         morphs.push({ scene: i, from, to, ghost: ghost.node, a: ghost.place(rectOf(from)), b: ghost.place(rectOf(to)) });
       } catch {
-        // 変形はおまけ。測れない要素があっても飛ばすだけで、再生には影響させない。
+        // Morphing is optional: elements that cannot be measured are skipped without affecting playback.
       }
     }
   }
@@ -142,7 +142,7 @@
     return { node: wrap, place: (r) => ({ x: r.x, y: r.y, s: r.w / w0 }) };
   }
 
-  // ── 4. カメラ：ナレーションの [名前] に対応する要素 ──
+  // ── 4. Camera: the element matching [name] in the narration ──
   const findKey = (sc, key) => {
     const all = [...sc.querySelectorAll('[data-key]')];
     const norm = (s) => s.replace(/[`*]/g, '').trim().toLowerCase();
@@ -151,7 +151,7 @@
       ?? [...sc.querySelectorAll(`${STEP_SEL}, text`)].find((el) => norm(el.textContent).includes(norm(key)));
   };
   const IDENT = { s: 1, x: 0, y: 0 };
-  // 寄っても切らない。拡大した後も図全体を、題名と字幕の間の安全な範囲に収める。
+  // Zooming never crops: the whole figure stays within the safe area between the title and the caption.
   const SAFE = { left: 60, right: W - 60, top: 140, bottom: H - 150 };
   function focusCam(r, sc) {
     const fit = sc.querySelector('.amv-fit');
@@ -177,7 +177,7 @@
   });
   const hlTargets = new Set(camEvents.map((e) => e.hl).filter(Boolean));
 
-  // ── 5. 決定的な描画：同じ時刻には必ず同じフレームを描く ──
+  // ── 5. Deterministic rendering: the same time always draws the same frame ──
   function render(t) {
     t = clamp(t, 0, D.duration);
     const cur = segs.findLastIndex((s) => t >= s.start);
@@ -191,7 +191,7 @@
       sc.style.opacity = op;
       sc.style.visibility = op > 0 ? 'visible' : 'hidden';
       if (heads[i]) {
-        // 題名を重ねない。古い題名は切り替えの前半で消え、新しい題名は後半で現れる。
+        // Titles never overlap: the old title fades out in the first half of the transition and the new one fades in during the second half.
         const hin = ease((t - seg.start - T / 2) / (T / 2));
         const hout = next ? 1 - ease((t - next.start) / (T / 2)) : 1;
         const hop = t < seg.start ? 0 : Math.min(hin, hout);
@@ -229,7 +229,7 @@
       m.to.style.opacity = 1;
     }
 
-    // カメラと強調
+    // camera and highlight
     const ev = camEvents.findLastIndex((e) => t >= e.t);
     let cam = IDENT;
     let hl = null;
@@ -243,7 +243,7 @@
     camera.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.s})`;
     for (const el of hlTargets) el.classList.toggle('amv-hl', el === hl);
 
-    // 字幕
+    // caption
     const beats = cur >= 0 ? segs[cur].beats : [];
     const b = beats.find((x) => t >= x.start && t < x.end + 0.3);
     const html = b ? b.html : '';
@@ -255,7 +255,7 @@
     updateUi(t);
   }
 
-  // ── 6. プレーヤー ──
+  // ── 6. Player ──
   const audio = document.getElementById('amv-audio');
   const seek = document.querySelector('.amv-seek');
   const timeEl = document.querySelector('.amv-time');
@@ -344,20 +344,20 @@
   }
   window.addEventListener('resize', fitStage);
 
-  // 書き出し：舞台を等倍で左上に置き、フレームごとに render(t) を呼ぶ。
+  // Export: place the stage at 1:1 in the top-left corner and call render(t) per frame.
   window.render = render;
   window.__amv = {
     duration: D.duration,
     fps: D.fps,
     exportMode() {
       root.setAttribute('data-export', '');
-      // 書き出す環境の配色で結果が変わらないよう、auto はライトに固定する。
+      // Pin auto to light so the output does not depend on the exporting machine's color scheme.
       if (root.getAttribute('data-mode') === 'auto') root.setAttribute('data-mode', 'light');
       stage.style.transform = '';
     },
   };
   fitStage();
-  // 表紙：完全に現れた後のタイトル画面を見せる。再生は 0 秒から始める。
+  // Poster: show the fully revealed title screen. Playback still starts at 0 seconds.
   render(Math.min(1, segs[0].end));
   updateUi(0);
 })();

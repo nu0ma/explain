@@ -1,7 +1,8 @@
-// explain render --watch：原稿を保存するたびに作り直し、ローカルの HTTP サーバーから配信する。
-// 配信するページにだけ再読み込みのスクリプトを足し、作り直すと Server-Sent Events で開いているページに知らせる。
+// explain render --watch: rebuild the manuscript on every save and serve it from a local HTTP server.
+// Only the served page gets a reload script; after a rebuild, Server-Sent Events notify the open pages.
 
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
 
@@ -9,23 +10,24 @@ const EVENTS = '/__explain/events';
 const RELOAD = `<script>new EventSource('${EVENTS}').onmessage = () => location.reload();</script>`;
 const DEBOUNCE_MS = 80;
 
-// build() は HTML を返す。作れなかったときは null を返す（エラーの表示は build() の役目）。
-// signal が中断されるまで動き続ける。onListen(url) はサーバーが待ち受けを始めたら呼ばれる。
-/**
- * @param {string} file
- * @param {() => string | null} build
- * @param {{ signal: AbortSignal, onListen: (url: string) => void }} options
- * @returns {Promise<void>}
- */
-export function serveWatch(file, build, { signal, onListen }) {
+export type WatchOptions = {
+  // Keeps serving until this signal aborts.
+  signal: AbortSignal;
+  // Called once the server starts listening.
+  onListen: (url: string) => void;
+};
+
+// build() returns the HTML, or null when it cannot build (build() reports the error itself).
+export function serveWatch(file: string, build: () => string | null, { signal, onListen }: WatchOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     let html = build() ?? '<!doctype html><meta charset="utf-8"><p>原稿にエラーがあります。ターミナルを確認してください。</p>';
-    const clients = new Set();
+    const clients = new Set<ServerResponse>();
 
     const server = createServer((req, res) => {
-      // DNS リバインディングで外部のサイトから読まれないよう、ローカルの名前で来た要求だけに応える。
-      const { port } = /** @type {import('node:net').AddressInfo} */ (server.address());
-      if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host)) {
+      // Answer only requests addressed by a local name, so DNS rebinding cannot let other sites read the page.
+      // The server listens on TCP, so address() is an AddressInfo.
+      const { port } = server.address() as AddressInfo;
+      if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host ?? '')) {
         res.writeHead(403).end();
         return;
       }
@@ -44,8 +46,8 @@ export function serveWatch(file, build, { signal, onListen }) {
       res.end(html.replace(/<\/body>/i, `${RELOAD}\n</body>`));
     });
 
-    // エディタは保存のときにファイルを置き換えることがあるので、ファイルではなくディレクトリを見る。
-    let timer = null;
+    // Editors may replace the file on save, so watch the directory rather than the file.
+    let timer: NodeJS.Timeout | undefined;
     const name = basename(file);
     const watcher = watch(dirname(file), (_event, changed) => {
       if (changed && changed !== name) return;
@@ -67,6 +69,6 @@ export function serveWatch(file, build, { signal, onListen }) {
     if (signal.aborted) return stop();
     signal.addEventListener('abort', stop, { once: true });
     server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => onListen(`http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (server.address()).port}/`));
+    server.listen(0, '127.0.0.1', () => onListen(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`));
   });
 }

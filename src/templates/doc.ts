@@ -1,8 +1,9 @@
-// doc：1 段組の解説。上から順に読む。パネルが 3 枚以上なら左に目次を出す。
+// doc: single-column explainer, read top to bottom. With 3 or more panels, a table of contents appears on the left.
 import { panelHtml, headHtml } from './panel.ts';
+import type { TemplateInput } from './panel.ts';
 import { esc } from '../svg/text.ts';
 
-export function doc({ meta, introHtml, panels }) {
+export function doc({ meta, introHtml, panels }: TemplateInput): string {
   const withToc = panels.length >= 3;
   const toc = withToc
     ? `<nav class="am-toc" aria-label="目次">${panels.map((p) => `<a href="#panel-${esc(p.id)}">${esc(p.id)} · ${esc(p.title)}</a>`).join('')}</nav>`

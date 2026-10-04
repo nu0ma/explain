@@ -1,12 +1,22 @@
-// テーマ = CSS 変数の組。部品のスタイル（base.css）は変数だけを参照するので、テーマの切り替えは data-theme を変えるだけで済む。
-// 各テーマは light / dark の 2 組の値を持つ。auto は OS の prefers-color-scheme に従う。
+// A theme is a set of CSS variables. Component styles (base.css) reference only the variables, so switching themes only changes data-theme.
+// Each theme has two sets of values, light and dark. auto follows the OS prefers-color-scheme.
 
 import { BASE_CSS } from '../assets.ts';
+
+// CSS custom property name -> value.
+export type CssVars = Readonly<Record<string, string>>;
+
+export type Theme = {
+  label: string;
+  common: CssVars;
+  light: CssVars;
+  dark: CssVars;
+};
 
 const SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, Roboto, "Helvetica Neue", Arial, sans-serif';
 const MONO = 'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
-const shared = { '--font-sans': SANS, '--font-mono': MONO };
+const shared: CssVars = { '--font-sans': SANS, '--font-mono': MONO };
 
 export const THEMES = Object.freeze({
   blueprint: {
@@ -45,12 +55,12 @@ export const THEMES = Object.freeze({
       '--warn': '#fbbf24', '--warn-bg': '#451a03', '--add': '#4ade80', '--add-bg': '#052e16', '--head-bg': '#fafafa', '--head-fg': '#18181b',
     },
   },
-});
+}) satisfies Readonly<Record<string, Theme>>;
 
-const block = (selector, vars) =>
+const block = (selector: string, vars: CssVars): string =>
   `${selector} {\n${Object.entries(vars).map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}`;
 
-export function themeCss() {
+export function themeCss(): string {
   return Object.entries(THEMES).map(([name, t]) => {
     const sel = `html[data-theme="${name}"]`;
     return [
@@ -61,6 +71,6 @@ export function themeCss() {
   }).join('\n\n');
 }
 
-export function pageCss() {
+export function pageCss(): string {
   return `${themeCss()}\n\n${BASE_CSS}`;
 }

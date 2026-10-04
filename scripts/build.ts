@@ -1,12 +1,12 @@
-// CLI を 1 ファイル dist/explain.mjs にまとめる。
-// 生成物は node_modules も src/ も参照しないので、Node があればこのファイル単体で動く。
+// Bundle the CLI into the single file dist/explain.mjs.
+// The output references neither node_modules nor src/, so it runs on its own wherever Node is installed.
 import { build, type Plugin } from 'esbuild';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
-// src/assets.ts をインライン文字列に差し替え、実行時にディスク上のファイルを読まないようにする。
+// Replace src/assets.ts with inline strings so nothing is read from disk at run time.
 const inlineAssets: Plugin = {
   name: 'inline-assets',
   setup(b) {

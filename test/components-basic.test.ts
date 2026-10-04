@@ -1,16 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPONENTS, ComponentError } from '../src/components/index.ts';
+import type { Component, RenderContext } from '../src/components/index.ts';
 
-const ctx = (args = '') => ({ args, uid: (() => { let n = 0; return () => `u${++n}`; })() });
-const render = (name, text, args) => COMPONENTS.get(name).render(text, ctx(args));
-const throwsAt = (fn, line) =>
+const ctx = (args = ''): RenderContext => ({ args, uid: (() => { let n = 0; return () => `u${++n}`; })() });
+const component = (name: string): Component => {
+  const c = COMPONENTS.get(name);
+  if (!c) throw new Error(`unknown component: ${name}`);
+  return c;
+};
+const render = (name: string, text: string, args?: string): string => component(name).render(text, ctx(args));
+const throwsAt = (fn: () => unknown, line: number): void =>
   assert.throws(fn, (e) => e instanceof ComponentError && e.line === line);
 
 test('どの部品にも name / summary / syntax / example があり、example を描画できる', () => {
   assert.ok(COMPONENTS.size >= 4);
   for (const [name, c] of COMPONENTS) {
-    for (const key of ['summary', 'syntax', 'example']) assert.ok(c[key], `${name}.${key}`);
+    for (const key of ['summary', 'syntax', 'example'] as const) assert.ok(c[key], `${name}.${key}`);
     const m = c.example.match(/^```(\S+)\s*(.*)\n([\s\S]*?)\n```$/);
     assert.ok(m, `${name}.example は 1 つの完全なコードブロックであること`);
     assert.equal(m[1], name);

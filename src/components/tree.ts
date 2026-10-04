@@ -1,7 +1,17 @@
-// 構造ツリー：字下げで階層を表す。根が 1 つで子が 2〜4 個なら組織図、それ以外は線つきの字下げリストで描く。
+// Structure tree: indentation expresses the hierarchy. One root with 2-4 children becomes an org chart; anything else is an indented list with connector lines.
 import { mdInline } from '../markdown.ts';
 import { ComponentError, fields } from './error.ts';
 import { esc } from '../svg/text.ts';
+import type { Component } from './types.ts';
+
+export type TreeNode = {
+  label: string;
+  sub: string;
+  hi: boolean;
+  indent: number;
+  step: number;
+  children: TreeNode[];
+};
 
 export default {
   name: 'tree',
@@ -31,55 +41,55 @@ export default {
     }
     return `<div class="am-tree">${listHtml(roots)}</div>`;
   },
-};
+} satisfies Component;
 
-function buildTree(text) {
-  const roots = [];
-  const stack = [];
+function buildTree(text: string): TreeNode[] {
+  const roots: TreeNode[] = [];
+  const stack: TreeNode[] = [];
   let step = 0;
   for (const raw of String(text).split('\n')) {
     if (!raw.trim()) continue;
-    const indent = raw.replace(/\t/g, '  ').match(/^ */)[0].length;
-    const node = { ...parseLabel(raw.trim()), indent, step: step++, children: [] };
-    while (stack.length && stack.at(-1).indent >= indent) stack.pop();
-    (stack.length ? stack.at(-1).children : roots).push(node);
+    const indent = raw.replace(/\t/g, '  ').match(/^ */)?.[0].length ?? 0;
+    const node: TreeNode = { ...parseLabel(raw.trim()), indent, step: step++, children: [] };
+    while (stack.length && (stack.at(-1)?.indent ?? -1) >= indent) stack.pop();
+    (stack.at(-1)?.children ?? roots).push(node);
     stack.push(node);
   }
   return roots;
 }
 
-function parseLabel(t) {
+function parseLabel(t: string): { label: string; sub: string; hi: boolean } {
   const hi = t.startsWith('*');
   const [label, sub = ''] = fields(hi ? t.slice(1) : t);
   return { label, sub, hi };
 }
 
-// ラベルがインラインコードで始まり後ろに文字が続くとき（例：`cli.js` 入口）、コード部分を灰色の番号ラベルにする。
-const labelHtml = (label) => mdInline(label).replace(/^<code>([^<]*)<\/code>(?=\s*\S)/, '<span class="am-tree-tag">$1</span>');
+// When a label starts with inline code followed by more text (e.g. `cli.js` 入口), render the code part as a gray tag.
+const labelHtml = (label: string): string => mdInline(label).replace(/^<code>([^<]*)<\/code>(?=\s*\S)/, '<span class="am-tree-tag">$1</span>');
 
-// data-key / data-step は動画で使う。同じ名前のノードは場面をまたいで変形し、ソースの行ごとに順に現れる。
-const vattrs = (n) => ` data-key="${esc(n.label)}" data-step="${n.step}"`;
+// data-key / data-step are for video: nodes with the same name morph across scenes and appear in source-line order.
+const vattrs = (n: TreeNode): string => ` data-key="${esc(n.label)}" data-step="${n.step}"`;
 
-const boxInner = (n) => `${labelHtml(n.label)}${n.sub ? `<small>${mdInline(n.sub)}</small>` : ''}`;
+const boxInner = (n: TreeNode): string => `${labelHtml(n.label)}${n.sub ? `<small>${mdInline(n.sub)}</small>` : ''}`;
 
-function rootBox(root, solo = false) {
+function rootBox(root: TreeNode, solo = false): string {
   return `<div class="am-tree-root${solo ? ' am-tree-root--solo' : ''}"><div class="am-tree-box am-tree-box--root"${vattrs(root)}>${boxInner(root)}</div></div>`;
 }
 
-function colHtml(node) {
+function colHtml(node: TreeNode): string {
   const children = node.children.length ? listHtml(node.children) : '';
   return `<div class="am-tree-col"><div class="am-tree-box${node.hi ? ' am-tree-box--hi' : ''}"${vattrs(node)}>${boxInner(node)}</div>${children}</div>`;
 }
 
-function orgHtml(root) {
+function orgHtml(root: TreeNode): string {
   return `<div class="am-tree">${rootBox(root)}<div class="am-tree-cols" style="--n: ${root.children.length}">${root.children.map(colHtml).join('')}</div></div>`;
 }
 
-function listHtml(nodes) {
+function listHtml(nodes: TreeNode[]): string {
   return `<ul class="am-tree-list">${nodes.map(liHtml).join('')}</ul>`;
 }
 
-function liHtml(n) {
+function liHtml(n: TreeNode): string {
   const sub = n.sub ? `<span class="am-tree-sub">${mdInline(n.sub)}</span>` : '';
   const kids = n.children.length ? `<ul>${n.children.map(liHtml).join('')}</ul>` : '';
   return `<li${n.hi ? ' class="am-tree-hi"' : ''}${vattrs(n)}><span class="am-tree-label">${labelHtml(n.label)}</span>${sub}${kids}</li>`;

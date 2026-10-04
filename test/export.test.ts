@@ -5,63 +5,79 @@ import { Writable } from 'node:stream';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { exportMp4, connect, ExportError } from '../src/video/export.ts';
+import type { CdpParams, CdpSocket, ExportDeps } from '../src/video/export.ts';
 
-// ffmpeg の代わり：標準入力に書かれたフレームを数え、入力が閉じたら exitCode で終わる。
-function fakeFfmpeg({ exitCode = 0, stderr = '' } = {}) {
-  const proc = new EventEmitter();
-  proc.args = null;
-  proc.frames = [];
-  proc.killed = null;
-  proc.stderr = new EventEmitter();
-  proc.stdin = new Writable({
-    write(chunk, _enc, cb) { proc.frames.push(chunk.toString()); cb(); },
-    final(cb) {
-      cb();
-      setImmediate(() => {
-        if (stderr) proc.stderr.emit('data', stderr);
-        proc.emit('close', exitCode);
-      });
-    },
-  });
-  proc.kill = (sig) => { proc.killed = sig; };
-  return proc;
+// Stands in for ffmpeg: collects frames written to stdin and exits with exitCode when stdin closes.
+class FakeFfmpeg extends EventEmitter {
+  args: string[] | null = null;
+  frames: string[] = [];
+  killed: NodeJS.Signals | null | undefined = null;
+  stderr = new EventEmitter();
+  stdin: Writable;
+  constructor({ exitCode = 0, stderr = '' } = {}) {
+    super();
+    this.stdin = new Writable({
+      write: (chunk: Buffer, _enc, cb) => { this.frames.push(chunk.toString()); cb(); },
+      final: (cb) => {
+        cb();
+        setImmediate(() => {
+          if (stderr) this.stderr.emit('data', stderr);
+          this.emit('close', exitCode);
+        });
+      },
+    });
+  }
+  kill(sig?: NodeJS.Signals) { this.killed = sig; }
 }
 
-// Chrome の代わり：タブごとに最後に描いた時刻を覚え、スクリーンショットとして "f<時刻>" を返す。
-// failAt の時刻を描こうとするとスクリプトのエラーを返す。
+const fakeFfmpeg = (opts: { exitCode?: number; stderr?: string } = {}) => new FakeFfmpeg(opts);
+
+// Stands in for Chrome: remembers the last time drawn per tab and returns "f<time>" as the screenshot.
+// Drawing the failAt time returns a script error.
 function fakeBrowser({ duration = 1, fps = 4, failAt = -1 } = {}) {
   let targets = 0;
-  const drawn = new Map();
-  const browser = { stopped: false, profileDir: null, tabs: 0 };
-  browser.cdp = {
-    async send(method, params, sessionId) {
-      if (method === 'Target.createTarget') return { targetId: `t${++targets}` };
-      if (method === 'Target.attachToTarget') { browser.tabs++; return { sessionId: `s-${params.targetId}` }; }
-      if (method === 'Runtime.evaluate') {
-        if (params.expression.startsWith('document.fonts')) return { result: { value: { duration, fps } } };
-        const t = Number(params.expression.match(/^render\((.+)\)$/)[1]);
-        if (t === failAt) return { exceptionDetails: { text: 'boom' } };
-        drawn.set(sessionId, t);
-        return { result: {} };
-      }
-      if (method === 'Page.captureScreenshot') return { data: Buffer.from(`f${drawn.get(sessionId)}`).toString('base64') };
-      return {};
+  const drawn = new Map<string | undefined, number>();
+  const browser = {
+    stopped: false,
+    profileDir: null as string | null,
+    tabs: 0,
+    cdp: {
+      async send(method: string, params: CdpParams = {}, sessionId?: string): Promise<unknown> {
+        if (method === 'Target.createTarget') return { targetId: `t${++targets}` };
+        if (method === 'Target.attachToTarget') { browser.tabs++; return { sessionId: `s-${String(params.targetId)}` }; }
+        if (method === 'Runtime.evaluate') {
+          const expression = String(params.expression);
+          if (expression.startsWith('document.fonts')) return { result: { value: { duration, fps } } };
+          const t = Number(/^render\((.+)\)$/.exec(expression)?.[1]);
+          if (t === failAt) return { exceptionDetails: { text: 'boom' } };
+          drawn.set(sessionId, t);
+          return { result: {} };
+        }
+        if (method === 'Page.captureScreenshot') return { data: Buffer.from(`f${drawn.get(sessionId)}`).toString('base64') };
+        return {};
+      },
+      once: async () => ({}),
+      close: () => {},
     },
-    once: async () => ({}),
+    stop: async () => { browser.stopped = true; },
   };
-  browser.stop = async () => { browser.stopped = true; };
   return browser;
 }
 
-function setup({ browser = fakeBrowser(), ffmpeg = fakeFfmpeg(), has = () => true, find = () => '/chrome' } = {}) {
-  const progress = [];
-  const deps = {
+function setup({
+  browser = fakeBrowser(),
+  ffmpeg = fakeFfmpeg(),
+  has = () => true,
+  find = () => '/chrome',
+}: { browser?: ReturnType<typeof fakeBrowser>; ffmpeg?: FakeFfmpeg; has?: () => boolean; find?: () => string | null } = {}) {
+  const progress: [number, number][] = [];
+  const deps: ExportDeps = {
     has,
     find,
     launch: async (_path, profileDir) => { browser.profileDir = profileDir; return browser; },
     encoder: (args) => { ffmpeg.args = args; return ffmpeg; },
   };
-  return { browser, ffmpeg, progress, opts: { deps, onProgress: (i, n) => progress.push([i, n]) } };
+  return { browser, ffmpeg, progress, opts: { deps, onProgress: (i: number, n: number) => progress.push([i, n]) } };
 }
 
 test('exportMp4: 全フレームを順に ffmpeg に渡し、ブラウザを止めて一時ディレクトリを消す', async () => {
@@ -76,11 +92,11 @@ test('exportMp4: 全フレームを順に ffmpeg に渡し、ブラウザを止�
     assert.equal(browser.tabs, concurrency, name);
     assert.deepEqual(ffmpeg.frames, ['f0', 'f0.25', 'f0.5', 'f0.75'], name);
     assert.deepEqual(progress, wantProgress, name);
-    assert.equal(ffmpeg.args.includes('-shortest'), wantAudio, name);
-    assert.equal(ffmpeg.args.at(-1), '/x/out.mp4', name);
+    assert.equal(ffmpeg.args?.includes('-shortest'), wantAudio, name);
+    assert.equal(ffmpeg.args?.at(-1), '/x/out.mp4', name);
     assert.equal(ffmpeg.killed, null, name);
     assert.equal(browser.stopped, true, name);
-    assert.equal(existsSync(dirname(browser.profileDir)), false, `${name}: 一時ディレクトリ`);
+    assert.equal(existsSync(dirname(String(browser.profileDir))), false, `${name}: 一時ディレクトリ`);
   }
 });
 
@@ -94,7 +110,7 @@ test('exportMp4: 途中で失敗したら ExportError にし、ffmpeg とブラ�
     await assert.rejects(exportMp4('/x/page.html', '/x/out.mp4', opts), (e) => e instanceof ExportError && wantErr.test(e.message), name);
     assert.equal(ffmpeg.killed, wantKilled, name);
     assert.equal(browser.stopped, true, name);
-    assert.equal(existsSync(dirname(browser.profileDir)), false, `${name}: 一時ディレクトリ`);
+    assert.equal(existsSync(dirname(String(browser.profileDir))), false, `${name}: 一時ディレクトリ`);
   }
 });
 
@@ -110,24 +126,30 @@ test('exportMp4: ffmpeg か Chrome がなければ、ブラウザを起動せず
   }
 });
 
-// WebSocket の代わり：送った要求を記録し、テストからイベントを起こせる。
-class FakeSocket extends EventTarget {
-  static last = null;
-  constructor(url) {
+// Stands in for WebSocket: records sent requests and lets the test fire events.
+class FakeSocket extends EventTarget implements CdpSocket {
+  static last: FakeSocket | null = null;
+  url: string;
+  sent: unknown[] = [];
+  constructor(url: string) {
     super();
     this.url = url;
-    this.sent = [];
     FakeSocket.last = this;
     setImmediate(() => this.dispatchEvent(new Event('open')));
   }
-  send(data) { this.sent.push(JSON.parse(data)); }
+  send(data: string) { this.sent.push(JSON.parse(data)); }
   close() { this.dispatchEvent(new Event('close')); }
-  reply(data) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) })); }
+  reply(data: unknown) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) })); }
+}
+
+function lastSocket(): FakeSocket {
+  if (!FakeSocket.last) throw new Error('no socket');
+  return FakeSocket.last;
 }
 
 test('connect: 応答を id で対応づけ、イベントを 1 回だけ待つ', async () => {
   const cdp = await connect('ws://x', { WebSocketImpl: FakeSocket });
-  const ws = FakeSocket.last;
+  const ws = lastSocket();
   const res = cdp.send('Page.enable', {}, 's1');
   const ev = cdp.once('Page.loadEventFired');
   assert.deepEqual(ws.sent, [{ id: 1, method: 'Page.enable', params: {}, sessionId: 's1' }]);
@@ -136,7 +158,7 @@ test('connect: 応答を id で対応づけ、イベントを 1 回だけ待つ'
   assert.deepEqual(await res, { ok: true });
   assert.deepEqual(await ev, { t: 1 });
 
-  // 同じイベントでもセッションごとに分けて待つ。
+  // The same event is awaited separately per session.
   const s1 = cdp.once('Page.loadEventFired', 's1');
   const s2 = cdp.once('Page.loadEventFired', 's2');
   ws.reply({ method: 'Page.loadEventFired', sessionId: 's2', params: { tab: 2 } });
@@ -152,7 +174,7 @@ test('connect: 接続が切れたら、待っている要求とイベントを�
   const cdp = await connect('ws://x', { WebSocketImpl: FakeSocket });
   const res = cdp.send('Runtime.evaluate');
   const ev = cdp.once('Page.loadEventFired');
-  FakeSocket.last.close();
+  lastSocket().close();
   await assert.rejects(res, /接続が切れました/);
   await assert.rejects(ev, /接続が切れました/);
   await assert.rejects(cdp.send('Page.enable'), /接続が切れました/);

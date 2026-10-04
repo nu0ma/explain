@@ -1,11 +1,14 @@
-// 上限バー：塗り = 現在値（なければ上限そのもの）、縦線 = 上限。上限を超えると赤くする。バーの長さは値に比例し、目盛りは 0 から始めて途中を省かない。
+// Limit bars: the fill is the current value (or the limit itself when there is none) and the vertical line is the limit. Over the limit turns red. Bar length is proportional to the value, and the scale starts at 0 with no break.
 import { esc } from '../svg/text.ts';
 import { ComponentError, contentLines, fields } from './error.ts';
+import type { Component } from './types.ts';
+
+type LimitRow = { label: string; value: number | null; limit: number; unit: string; note: string };
 
 const NICE_MAX = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
 const NICE_STEP = [1, 2, 2.5, 5, 10];
 
-export function niceScale(peak) {
+export function niceScale(peak: number): { max: number; step: number } {
   const target = peak * 1.4;
   const pow = 10 ** Math.floor(Math.log10(target));
   const integral = Number.isInteger(peak);
@@ -17,8 +20,8 @@ export function niceScale(peak) {
   return { max: round(max), step: round(step) };
 }
 
-const round = (n) => Math.round(n * 1000) / 1000;
-const pct = (v, max) => `${Math.round((v / max) * 10000) / 100}%`;
+const round = (n: number): number => Math.round(n * 1000) / 1000;
+const pct = (v: number, max: number): string => `${Math.round((v / max) * 10000) / 100}%`;
 const NUM = /^(?:max\s+)?(-?\d+(?:\.\d+)?)$/i;
 
 export default {
@@ -35,25 +38,26 @@ export default {
     if (!rows.length) throw new ComponentError('limits には 1 行以上必要です', 1);
     return `<div class="am-limits">${rows.map(rowHtml).join('')}</div>`;
   },
-};
+} satisfies Component;
 
-function parseRow(t, line) {
+function parseRow(t: string, line: number): LimitRow {
   const [label, spec = '', unit = '', note = ''] = fields(t);
   const [a, b] = spec.split('/').map((s) => s.trim());
   const nums = (b === undefined ? [a] : [a, b]).map((s) => s?.match(NUM)?.[1]);
-  if (!spec || nums.some((n) => n === undefined)) {
+  const [n0, n1] = nums;
+  if (!spec || n0 === undefined || (b !== undefined && n1 === undefined)) {
     throw new ComponentError(`limits の行は ラベル | 現在値 / 上限 | 単位 の形で書いてください："${t}"`, line);
   }
-  const [value, limit] = b === undefined ? [null, Number(nums[0])] : nums.map(Number);
+  const [value, limit] = n1 === undefined ? [null, Number(n0)] : [Number(n0), Number(n1)];
   return { label, value, limit, unit, note };
 }
 
-function rowHtml({ label, value, limit, unit, note }) {
+function rowHtml({ label, value, limit, unit, note }: LimitRow): string {
   const { max, step } = niceScale(Math.max(limit, value ?? 0));
   const shown = value ?? limit;
   const over = value !== null && value > limit;
   const valText = `${value !== null ? `${value} / ` : ''}max ${limit}${unit ? ` ${unit}` : ''}`;
-  const ticks = [];
+  const ticks: string[] = [];
   for (let v = 0; v <= max + 1e-9; v += step) ticks.push(`<span style="left: ${pct(round(v), max)}">${round(v)}</span>`);
   return `<div class="am-lim${over ? ' is-over' : ''}">
 <div class="am-lim-head"><span>${esc(label)}${note ? `<span class="am-lim-note">${esc(note)}</span>` : ''}</span><span class="am-lim-val">${esc(valText)}</span></div>

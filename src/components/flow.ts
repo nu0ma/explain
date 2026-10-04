@@ -1,28 +1,57 @@
-// フロー図・構成図：原稿には関係（A -> B: ラベル）だけを書く。座標は dagre が計算し、ここでは配置結果を SVG に描く。
+// Flow / architecture diagram: the script states only relations (A -> B: label). dagre computes coordinates; this module draws the result as SVG.
 import dagre from '@dagrejs/dagre';
+import type { EdgeLabel, Graph, GraphLabel, NodeLabel } from '@dagrejs/dagre';
 import { esc, measure, wrap } from '../svg/text.ts';
 import { f, smoothPath, arrowDefs, svgOpen, textLines } from '../svg/shapes.ts';
+import type { Point } from '../svg/shapes.ts';
 import { ComponentError, contentLines } from './error.ts';
+import type { Component } from './types.ts';
+
+export type FlowShape = 'db' | 'rect' | 'round' | 'diamond';
+export type FlowDiff = 'add' | 'chg' | 'del';
+type Rankdir = 'TB' | 'LR' | 'BT' | 'RL';
+
+export type FlowNode = {
+  id: string;
+  label: string;
+  shape: FlowShape;
+  // True when the shape came from an explicit bracket, so it overrides an earlier bare mention.
+  explicit: boolean;
+  hi: boolean;
+  diff: FlowDiff | null;
+  line: number;
+};
+export type FlowEdge = { from: string; to: string; dashed: boolean; diff: FlowDiff | null; label: string; line: number };
+export type FlowGroup = { name: string; members: string[]; line: number };
+export type FlowModel = { nodes: Map<string, FlowNode>; edges: FlowEdge[]; groups: FlowGroup[] };
+
+type NodeSpec = Omit<FlowNode, 'line'>;
+type ChainStep = { arrow: string | null; nodes: NodeSpec[] };
+type NodeSize = { lines: string[]; width: number; height: number };
+type Box = { x: number; y: number; width: number; height: number };
+// Cluster nodes have no size until dagre computes it, so width and height are optional.
+type LayoutGraph = Graph<GraphLabel, Partial<NodeLabel>, EdgeLabel>;
 
 const FS = 13;
 const LH = 17;
 const TEXT_MAX = 150;
 const EDGE_FS = 11.5;
-const DIRS = new Set(['TB', 'LR', 'BT', 'RL']);
+const DIRS: ReadonlySet<string> = new Set<Rankdir>(['TB', 'LR', 'BT', 'RL']);
+const isRankdir = (dir: string): dir is Rankdir => DIRS.has(dir);
 
-// 形の括弧：長い開き括弧から先に照合する。
-const BRACKETS = [
+// Shape brackets: match longer opening brackets first.
+const BRACKETS: ReadonlyArray<{ open: string; close: string; shape: FlowShape }> = [
   { open: '[(', close: ')]', shape: 'db' },
   { open: '[', close: ']', shape: 'rect' },
   { open: '(', close: ')', shape: 'round' },
   { open: '{', close: '}', shape: 'diamond' },
 ];
-// 差分の矢印（+-> 追加、x-> 削除）は通常の矢印より先に照合する。
+// Diff arrows (+-> added, x-> removed) are matched before the plain arrows.
 const ARROW = /^\s*(\+->|x->|-->|->)\s*/;
-const EDGE_DIFF = { '+->': 'add', 'x->': 'del' };
-// ノードの差分の印：+ 追加、~ 変更、- 削除。
-const NODE_DIFF = { '+': 'add', '~': 'chg', '-': 'del' };
-const DIFF_LABEL = { add: '追加', chg: '変更', del: '削除' };
+const EDGE_DIFF: Partial<Record<string, FlowDiff>> = { '+->': 'add', 'x->': 'del' };
+// Node diff marks: + added, ~ changed, - removed.
+const NODE_DIFF: Partial<Record<string, FlowDiff>> = { '+': 'add', '~': 'chg', '-': 'del' };
+const DIFF_LABEL: Record<FlowDiff, string> = { add: '追加', chg: '変更', del: '削除' };
 
 export default {
   name: 'flow',
@@ -44,15 +73,15 @@ group グループ名: B, C        ← ノードを 1 つのグループで囲�
   render(text, { args, uid }) {
     const model = parseFlow(text);
     const dir = (args.match(/\b(TB|LR|BT|RL)\b/i)?.[1] ?? 'TB').toUpperCase();
-    return `<figure class="am-diagram am-flow">${layout(model, DIRS.has(dir) ? dir : 'TB', uid())}${legend(model)}</figure>`;
+    return `<figure class="am-diagram am-flow">${layout(model, isRankdir(dir) ? dir : 'TB', uid())}${legend(model)}</figure>`;
   },
-};
+} satisfies Component;
 
-export function parseFlow(text) {
-  const nodes = new Map();
-  const edges = [];
-  const groups = [];
-  const upsert = (spec, line) => {
+export function parseFlow(text: string): FlowModel {
+  const nodes = new Map<string, FlowNode>();
+  const edges: FlowEdge[] = [];
+  const groups: FlowGroup[] = [];
+  const upsert = (spec: NodeSpec, line: number): string => {
     const prev = nodes.get(spec.id);
     if (!prev) nodes.set(spec.id, { ...spec, line });
     else nodes.set(spec.id, { ...prev, shape: spec.explicit ? spec.shape : prev.shape, hi: prev.hi || spec.hi, diff: prev.diff || spec.diff });
@@ -69,9 +98,10 @@ export function parseFlow(text) {
     const ids = chain.map((step) => ({ ...step, ids: step.nodes.map((n) => upsert(n, line)) }));
     for (let k = 1; k < ids.length; k++) {
       const isLast = k === ids.length - 1;
+      const arrow = ids[k].arrow;
       for (const from of ids[k - 1].ids) {
         for (const to of ids[k].ids) {
-          edges.push({ from, to, dashed: ids[k].arrow === '-->', diff: EDGE_DIFF[ids[k].arrow] ?? null, label: isLast ? label : '', line });
+          edges.push({ from, to, dashed: arrow === '-->', diff: arrow === null ? null : EDGE_DIFF[arrow] ?? null, label: isLast ? label : '', line });
         }
       }
     }
@@ -84,13 +114,13 @@ export function parseFlow(text) {
   return { nodes, edges, groups };
 }
 
-// 1 行 = ノードの組（& 区切り）を矢印でつないだもの。末尾に ": ラベル" をつけられる。
-function parseChain(t, line) {
-  const chain = [];
+// One line = groups of nodes (separated by &) joined by arrows, optionally followed by ": label".
+function parseChain(t: string, line: number): { chain: ChainStep[]; label: string } {
+  const chain: ChainStep[] = [];
   let pos = 0;
-  let arrow = null;
+  let arrow: string | null = null;
   for (;;) {
-    const group = [];
+    const group: NodeSpec[] = [];
     for (;;) {
       const { node, end } = parseNode(t, pos, line);
       group.push(node);
@@ -112,94 +142,108 @@ function parseChain(t, line) {
   return { chain, label: rest.replace(/^[:：]\s*/, '') };
 }
 
-function parseNode(t, start, line) {
-  let pos = start + t.slice(start).match(/^\s*/)[0].length;
+function parseNode(t: string, start: number, line: number): { node: NodeSpec; end: number } {
+  let pos = start + (t.slice(start).match(/^\s*/)?.[0].length ?? 0);
   const diff = NODE_DIFF[t[pos]] ?? null;
   if (diff) pos++;
   const hi = t[pos] === '*';
   if (hi) pos++;
   const bracket = BRACKETS.find((b) => t.startsWith(b.open, pos));
-  let label;
-  let end;
+  let label: string;
+  let end: number;
   if (bracket) {
     const close = t.indexOf(bracket.close, pos + bracket.open.length);
     if (close === -1) throw new ComponentError(`flow の形の括弧が閉じていません：${bracket.close} がありません`, line);
     label = t.slice(pos + bracket.open.length, close).trim();
     end = close + bracket.close.length;
   } else {
+    // The lookahead ends in $, so this always matches.
     const m = t.slice(pos).match(/^(.*?)(?=\s+(?:\+->|x->)|\s*(?:-->|->|&|[:：]|$))/);
-    label = m[1].trim();
-    end = pos + m[0].length;
+    label = m?.[1].trim() ?? '';
+    end = pos + (m?.[0].length ?? 0);
   }
   if (!label) throw new ComponentError(`flow に空のノードがあります："${t}"`, line);
   return { node: { id: label, label, shape: bracket?.shape ?? 'rect', explicit: Boolean(bracket), hi, diff }, end };
 }
 
-function nodeSize(node) {
+function nodeSize(node: FlowNode): NodeSize {
   const lines = wrap(node.label, TEXT_MAX, FS);
   const tw = Math.max(...lines.map((l) => measure(l, FS)));
   const th = lines.length * LH;
   const w = Math.max(tw + 28, 64);
   const h = th + 18;
-  const size = {
+  const sizes: Record<FlowShape, [number, number]> = {
     rect: [w, h],
     round: [w + 12, h],
     diamond: [(tw + 28) * 1.5, h * 1.6],
     db: [w, h + 14],
-  }[node.shape];
+  };
+  const size = sizes[node.shape];
   return { lines, width: size[0], height: size[1] };
 }
 
-function layout({ nodes, edges, groups }, rankdir, id) {
-  const g = new dagre.graphlib.Graph({ compound: groups.length > 0, multigraph: true });
+// dagre fills in these values during layout; a missing one means the layout did not run.
+function laidOut(v: number | undefined, what: string): number {
+  if (v === undefined) throw new Error(`dagre did not compute ${what}`);
+  return v;
+}
+
+function nodeBox(g: LayoutGraph, id: string): Box {
+  const n = g.node(id);
+  return { x: laidOut(n.x, `x of ${id}`), y: laidOut(n.y, `y of ${id}`), width: laidOut(n.width, `width of ${id}`), height: laidOut(n.height, `height of ${id}`) };
+}
+
+function layout({ nodes, edges, groups }: FlowModel, rankdir: Rankdir, id: string): string {
+  const g: LayoutGraph = new dagre.graphlib.Graph<GraphLabel, Partial<NodeLabel>, EdgeLabel>({ compound: groups.length > 0, multigraph: true });
   g.setGraph({ rankdir, nodesep: 36, ranksep: 46, marginx: 14, marginy: groups.length ? 26 : 14 });
   g.setDefaultEdgeLabel(() => ({}));
-  const sizes = new Map();
-  for (const n of nodes.values()) {
-    const s = nodeSize(n);
-    sizes.set(n.id, s);
-    g.setNode(n.id, { width: s.width, height: s.height });
-  }
+  const sized = [...nodes.values()].map((n) => ({ n, size: nodeSize(n) }));
+  for (const { n, size } of sized) g.setNode(n.id, { width: size.width, height: size.height });
   groups.forEach((grp, i) => {
     g.setNode(`__group${i}`, { label: grp.name });
     grp.members.forEach((m) => g.setParent(m, `__group${i}`));
   });
   edges.forEach((e, i) => {
-    const label = e.label ? { label: e.label, width: measure(e.label, EDGE_FS) + 12, height: 18, labelpos: 'c' } : {};
+    const label: EdgeLabel = e.label ? { label: e.label, width: measure(e.label, EDGE_FS) + 12, height: 18, labelpos: 'c' } : {};
     g.setEdge(e.from, e.to, label, `e${i}`);
   });
   dagre.layout(g);
 
   const clusters = groups.map((grp, i) => {
-    const c = g.node(`__group${i}`);
+    const c = nodeBox(g, `__group${i}`);
     const x = c.x - c.width / 2;
     const y = c.y - c.height / 2;
     return `<rect class="am-cluster" x="${f(x)}" y="${f(y)}" width="${f(c.width)}" height="${f(c.height)}" rx="4"/><text class="am-cluster-label" x="${f(x + 8)}" y="${f(y + 14)}">${esc(grp.name)}</text>`;
   });
 
-  // 動画ではソースの行ごとに順に現れる。同じ行に書いた矢印と、その行で初めて出たノードは同じ手順に入る。
+  // In video, elements appear one source line at a time. Arrows on a line and nodes first seen on that line share a step.
   const stepOf = new Map([...new Set([...[...nodes.values()].map((n) => n.line), ...edges.map((e) => e.line)])].sort((a, b) => a - b).map((l, k) => [l, k]));
   const edgeSvg = edges.map((e, i) => {
     const data = g.edge({ v: e.from, w: e.to, name: `e${i}` });
-    const pts = clipEnds(data.points, g.node(e.from), nodes.get(e.from).shape, g.node(e.to), nodes.get(e.to).shape);
+    if (!data.points) throw new Error(`dagre did not compute points of edge ${e.from} -> ${e.to}`);
+    const pts = clipEnds(data.points, nodeBox(g, e.from), nodes.get(e.from)?.shape, nodeBox(g, e.to), nodes.get(e.to)?.shape);
     const path = `<path class="am-edge${e.dashed ? ' am-edge--dashed' : ''}${e.diff ? ` am-edge--${e.diff}` : ''}" d="${smoothPath(pts)}" marker-end="url(#${id}-arrow${e.diff ? `-${e.diff}` : ''})"/>`;
     if (!e.label) return `<g data-step="${stepOf.get(e.line)}">${path}</g>`;
     const w = measure(e.label, EDGE_FS) + 10;
-    return `<g data-step="${stepOf.get(e.line)}">${path}<g class="am-edge-label"><rect x="${f(data.x - w / 2)}" y="${f(data.y - 9)}" width="${f(w)}" height="18" rx="3"/>${textLines([e.label], data.x, data.y, LH)}</g></g>`;
+    const lx = laidOut(data.x, `label x of edge ${e.from} -> ${e.to}`);
+    const ly = laidOut(data.y, `label y of edge ${e.from} -> ${e.to}`);
+    return `<g data-step="${stepOf.get(e.line)}">${path}<g class="am-edge-label"><rect x="${f(lx - w / 2)}" y="${f(ly - 9)}" width="${f(w)}" height="18" rx="3"/>${textLines([e.label], lx, ly, LH)}</g></g>`;
   });
 
-  const nodeSvg = [...nodes.values()].map((n) => {
-    const { x, y } = g.node(n.id);
-    const { width: w, height: h, lines } = sizes.get(n.id);
+  const nodeSvg = sized.map(({ n, size }) => {
+    const { x, y } = nodeBox(g, n.id);
+    const { width: w, height: h, lines } = size;
     return `<g class="am-node am-node--${n.shape}${n.hi ? ' am-node--hi' : ''}${n.diff ? ` am-node--${n.diff}` : ''}" data-key="${esc(n.label)}" data-step="${stepOf.get(n.line)}">${shapeSvg(n.shape, x, y, w, h)}${textLines(lines, x, y + (n.shape === 'db' ? 4 : 0), LH)}</g>`;
   });
 
-  const { width, height } = g.graph();
+  const graph = g.graph();
+  const width = laidOut(graph.width, 'graph width');
+  const height = laidOut(graph.height, 'graph height');
   const label = `フロー図：${[...nodes.keys()].slice(0, 8).join('、')}`;
   return `${svgOpen(width, height, label)}${arrowDefs(id)}${diffArrowDefs(id, edges)}<g>${clusters.join('')}</g><g>${edgeSvg.join('')}</g><g>${nodeSvg.join('')}</g></svg>`;
 }
 
-function shapeSvg(shape, x, y, w, h) {
+function shapeSvg(shape: FlowShape, x: number, y: number, w: number, h: number): string {
   const l = x - w / 2;
   const t = y - h / 2;
   if (shape === 'diamond') {
@@ -213,15 +257,15 @@ function shapeSvg(shape, x, y, w, h) {
   return `<rect class="am-node-shape" x="${f(l)}" y="${f(t)}" width="${f(w)}" height="${f(h)}" rx="${f(rx)}"/>`;
 }
 
-// dagre は矢印の端を長方形の境界で切る。ひし形では斜辺との交点を求め直す。そうしないと矢印が宙に浮く。
-function clipEnds(points, from, fromShape, to, toShape) {
+// dagre clips arrow ends at the bounding rectangle. For diamonds, recompute the intersection with the slanted edge, or the arrow floats in the air.
+function clipEnds(points: readonly Point[], from: Box, fromShape: FlowShape | undefined, to: Box, toShape: FlowShape | undefined): Point[] {
   const pts = points.map((p) => ({ ...p }));
   if (fromShape === 'diamond' && pts.length > 1) pts[0] = diamondPoint(from, pts[1]);
   if (toShape === 'diamond' && pts.length > 1) pts[pts.length - 1] = diamondPoint(to, pts[pts.length - 2]);
   return pts;
 }
 
-function diamondPoint(node, toward) {
+function diamondPoint(node: Box, toward: Point): Point {
   const dx = toward.x - node.x;
   const dy = toward.y - node.y;
   const k = Math.abs(dx) / (node.width / 2) + Math.abs(dy) / (node.height / 2);
@@ -229,17 +273,18 @@ function diamondPoint(node, toward) {
   return { x: node.x + dx / k, y: node.y + dy / k };
 }
 
-// 差分の矢印は矢じりも同じ色にするため、使われた種類だけマーカーを足す。
-function diffArrowDefs(id, edges) {
+// Diff arrows get arrowheads in the same color, so add a marker for each kind in use.
+function diffArrowDefs(id: string, edges: readonly FlowEdge[]): string {
   const kinds = [...new Set(edges.map((e) => e.diff).filter(Boolean))];
   if (!kinds.length) return '';
   return `<defs>${kinds.map((k) => `<marker id="${id}-arrow-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow am-arrow--${k}" d="M0,0 L10,5 L0,10 z"/></marker>`).join('')}</defs>`;
 }
 
-// 差分の印が 1 つでもあれば、使われた種類だけの凡例を図の下に出す。
-function legend({ nodes, edges }) {
+// If any diff mark is used, show a legend under the diagram with only the kinds in use.
+function legend({ nodes, edges }: FlowModel): string {
   const used = new Set([...[...nodes.values()].map((n) => n.diff), ...edges.map((e) => e.diff)].filter(Boolean));
   if (!used.size) return '';
-  const items = ['add', 'chg', 'del'].filter((k) => used.has(k)).map((k) => `<span class="am-legend-item am-legend-item--${k}"><i></i>${DIFF_LABEL[k]}</span>`);
+  const order: readonly FlowDiff[] = ['add', 'chg', 'del'];
+  const items = order.filter((k) => used.has(k)).map((k) => `<span class="am-legend-item am-legend-item--${k}"><i></i>${DIFF_LABEL[k]}</span>`);
   return `<figcaption class="am-legend">${items.join('')}</figcaption>`;
 }

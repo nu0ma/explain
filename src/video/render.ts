@@ -1,5 +1,5 @@
-// 動画の原稿 → 1 ファイルの再生ページ。画面はページの部品を使い回す。タイムラインは各ナレーションの音声の長さ（または見積もり）で決まる。
-// 再生ページの render(t) は決定的で、同じ時刻には必ず同じフレームを描く。MP4 の書き出しではこれをフレームごとに呼ぶ。
+// Video script -> single-file player page. The screen reuses page components. The timeline follows each narration's audio length (or an estimate).
+// The player's render(t) is deterministic: the same time always draws the same frame. MP4 export calls it once per frame.
 import { renderBlocks, LintError } from '../render.ts';
 import { timestamp } from '../time.ts';
 import { pageCss } from '../themes/index.ts';
@@ -9,35 +9,68 @@ import { VERSION, VIDEO_CSS, VIDEO_JS } from '../assets.ts';
 import { parseVideo, buildTimeline, estimateSeconds, allBeats, VIDEO_THEMES } from './script.ts';
 import { CHOICES, ParseError, applyOverrides } from '../parse.ts';
 import { synthAll, mixTrack, SAMPLE_RATE } from './tts.ts';
+import type { EncodedAudio, TtsProvider } from './tts.ts';
+import type { Video } from './script.ts';
 
-// 再生ページのコントロールの文言。
+type Meta = Video['meta'];
+type RenderContext = Parameters<typeof renderBlocks>[1];
+type Warning = ReturnType<typeof lintDoc>[number];
+
+export interface RenderVideoOptions {
+  provider?: TtsProvider | null;
+  cacheDir?: string;
+  defaults?: NonNullable<Parameters<typeof parseVideo>[1]>['defaults'];
+  overrides?: Parameters<typeof applyOverrides>[1];
+  onProgress?: (msg: string) => void;
+  encodeAudio?: ((wav: Buffer) => Promise<EncodedAudio | null>) | null;
+}
+
+export interface RenderedVideo {
+  html: string;
+  wav: Buffer | null;
+  warnings: Warning[];
+  stats: { panels: number; components: Record<string, number> };
+  meta: Meta;
+  duration: number;
+  beats: number;
+}
+
+interface PlayerSegment {
+  start: number;
+  end: number;
+  title: string | undefined;
+  beats: { text: string; focus: string | null; start: number; end: number; html: string }[];
+}
+
+interface PlayerData {
+  duration: number;
+  fps: number;
+  segments: PlayerSegment[];
+}
+
+// Labels for the player controls.
 export const VIDEO_UI = Object.freeze({ play: '再生', pause: '一時停止', chapters: 'チャプター', seek: '再生位置' });
 
-// provider が null なら字幕だけを出し、長さは文字数から見積もる。
-// encodeAudio(wav) は埋め込む音声を { mime, data } に変える（null を返せば WAV のまま）。省略すると WAV を埋め込む。
-/**
- * @param {string} source
- * @param {{
- *   provider?: { name: string, id: string, concurrency?: number, synth: (text: string) => Promise<Int16Array> } | null,
- *   cacheDir?: string, defaults?: object, overrides?: object, onProgress?: (msg: string) => void,
- *   encodeAudio?: ((wav: Buffer) => Promise<{ mime: string, data: Buffer } | null>) | null,
- * }} [options]
- */
-export async function renderVideo(source, { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null } = {}) {
+// With a null provider, only captions are shown and durations are estimated from the text length.
+// encodeAudio(wav) converts the embedded audio to { mime, data } (returning null keeps the WAV). When omitted, the WAV is embedded.
+export async function renderVideo(
+  source: string,
+  { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null }: RenderVideoOptions = {},
+): Promise<RenderedVideo> {
   const video = parseVideo(source, { defaults });
   const { meta } = video;
-  // コマンドラインの引数は原稿と設定より優先する。
+  // Command-line arguments take precedence over the script and the config.
   applyOverrides(meta, overrides, { ...CHOICES, theme: VIDEO_THEMES });
 
   if (meta.static === 'true') throw new ParseError('動画の再生には JavaScript が必要なため、static: true は使えません', 0);
 
-  // ナレーションは 1 行が 1 拍なので、何行続いても「長すぎる段落」とはみなさない。
+  // Each narration line is one beat, so any number of consecutive lines is not a "paragraph too long".
   const warnings = meta.style === 'off' ? [] : lintDoc(video.doc).filter((w) => w.rule !== 'paragraph-length');
   if (meta.style === 'strict' && blockingWarnings(warnings).length) throw new LintError(blockingWarnings(warnings));
 
   const beats = allBeats(video);
-  let clips = null;
-  let durations;
+  let clips: Int16Array[] | null = null;
+  let durations: number[];
   if (provider) {
     onProgress?.(`音声合成：${provider.name}、${beats.length} 文`);
     clips = await synthAll(beats.map((b) => b.text), provider, { cacheDir });
@@ -51,8 +84,8 @@ export async function renderVideo(source, { provider = null, cacheDir, defaults 
   const audio = wav && ((encodeAudio && await encodeAudio(wav)) || { mime: 'audio/wav', data: wav });
 
   const stats = { panels: video.scenes.length, components: {} };
-  const ctx = { seq: 0, stats };
-  const data = {
+  const ctx: RenderContext = { seq: 0, stats };
+  const data: PlayerData = {
     duration: timeline.duration,
     fps: 30,
     segments: [timeline.title, ...timeline.scenes].map((s, i) => ({
@@ -72,17 +105,17 @@ export async function renderVideo(source, { provider = null, cacheDir, defaults 
   return { html, wav, warnings, stats, meta, duration: timeline.duration, beats: beats.length };
 }
 
-const beatsOf = (video, i) => (i === 0 ? video.introBeats : video.scenes[i - 1].beats);
+const beatsOf = (video: Video, i: number) => (i === 0 ? video.introBeats : video.scenes[i - 1].beats);
 
-// 字幕：[名前] を強調語にする。
-export function captionHtml(raw) {
+// Captions: [name] becomes emphasized text.
+export function captionHtml(raw: string): string {
   return raw.split(/(\[[^\]\n]+\])/).map((part) => {
     const m = part.match(/^\[([^\]]+)\]$/);
     return m ? `<b>${esc(m[1])}</b>` : esc(part);
   }).join('');
 }
 
-function titleScene(meta, introHtml, { scenes, duration }) {
+function titleScene(meta: Meta, introHtml: string, { scenes, duration }: { scenes: number; duration: number }): string {
   const mmss = `${Math.floor(duration / 60)}:${String(Math.round(duration % 60)).padStart(2, '0')}`;
   const cells = [['DRAWN', 'explain'], ['DATE', timestamp().slice(0, 10)], ['SCENES', String(scenes)], ['DURATION', mmss]];
   const block = `<div class="amv-titleblock">${cells.map(([k, v]) => `<div><b>${k}</b><span>${esc(v)}</span></div>`).join('')}</div>`;
@@ -91,29 +124,29 @@ function titleScene(meta, introHtml, { scenes, duration }) {
 </section>`;
 }
 
-function scene(s, i, total, body) {
-  const pad = (n) => String(n).padStart(2, '0');
+function scene(s: Video['scenes'][number], i: number, total: number, body: string): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
   return `<section class="amv-scene" data-i="${i + 1}">
 <header class="amv-scene-head"><span class="amv-scene-n">${esc(s.id)}</span><span class="amv-scene-title">${esc(s.title)}</span><span class="amv-scene-meta">SHEET ${pad(i + 1)} / ${pad(total)}</span></header>
 <div class="amv-body"><div class="amv-fit">${body}</div></div>
 </section>`;
 }
 
-// 図面の外枠と座標の目盛り（blueprint テーマのときだけ表示）。カメラの外に固定する。
-function sheetFrame() {
-  const ruler = (side, labels) => `<div class="amv-ruler amv-ruler--${side}">${labels.map((l) => `<span>${l}</span>`).join('')}</div>`;
+// Drawing sheet border and coordinate rulers (shown only with the blueprint theme), fixed outside the camera.
+function sheetFrame(): string {
+  const ruler = (side: string, labels: readonly (string | number)[]) => `<div class="amv-ruler amv-ruler--${side}">${labels.map((l) => `<span>${l}</span>`).join('')}</div>`;
   const nums = [1, 2, 3, 4, 5, 6, 7, 8];
   const letters = ['A', 'B', 'C', 'D'];
   return `<div class="amv-sheet" aria-hidden="true">${ruler('top', nums)}${ruler('bottom', nums)}${ruler('left', letters)}${ruler('right', letters)}</div>`;
 }
 
-// 3b1b はダーク専用。auto は再生する OS の配色に従う（MP4 の書き出しではライトに固定する）。
-export function videoMode(meta) {
+// 3b1b is dark only. auto follows the viewer's OS color scheme (MP4 export pins it to light).
+export function videoMode(meta: { theme?: unknown; mode?: unknown }): 'light' | 'dark' | 'auto' {
   if (meta.theme === '3b1b') return 'dark';
-  return ['light', 'dark'].includes(meta.mode) ? meta.mode : 'auto';
+  return meta.mode === 'light' || meta.mode === 'dark' ? meta.mode : 'auto';
 }
 
-function shell({ meta, scenesHtml, data, audio, source }) {
+function shell({ meta, scenesHtml, data, audio, source }: { meta: Meta; scenesHtml: string; data: PlayerData; audio: EncodedAudio | null; source: string }): string {
   const ui = VIDEO_UI;
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   return `<!doctype html>

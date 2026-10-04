@@ -1,12 +1,13 @@
-// AI が書いた日本語に多い書き方の検査。yomiyasu（https://github.com/nanaism/yomiyasu）v1.0.5 の
-// scripts/yomiyasu_lint.py の規則をすべて移植した。語と正規表現の一覧、太字が表示されるかの判定、
-// 太字・箇条書きの頻度、文末の繰り返しの判定は元のスクリプトに合わせている。explain に合わせて変えたところ：
-// - 検査する範囲は explain の STE 検査と同じにする。表のセルと引用（動画のナレーション）も見る。
-//   コード、インラインコード、~~取り消し線~~、状態が no の表の行、HTML のブロックは見ない。
-// - 絵文字から ✓ ✔ ✗ ✘ ⚠ を除く。explain では表の状態語（バッジ）の書き方として使う。
-// - 重大度は yomiyasu のまま持つ。info（「AではなくB」）は style: strict でも生成を止めない。
+// Checks for writing patterns common in AI-written Japanese. All rules are ported from
+// scripts/yomiyasu_lint.py in yomiyasu (https://github.com/nanaism/yomiyasu) v1.0.5. The word and regex lists,
+// the bold-rendering check, the bold/list frequency, and the sentence-end repetition check follow the original script.
+// Changes for explain:
+// - The checked scope matches explain's STE checks, including table cells and quotes (video narration).
+//   Code, inline code, ~~strikethrough~~, table rows with status no, and HTML blocks are skipped.
+// - ✓ ✔ ✗ ✘ ⚠ are excluded from emoji, since explain uses them as table status words (badges).
+// - Severities are kept as in yomiyasu. info (「AではなくB」) does not block generation even with style: strict.
 //
-// この一覧と判定には yomiyasu のライセンスが適用される：
+// The yomiyasu license applies to these lists and checks:
 //
 // MIT License
 //
@@ -30,7 +31,65 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// 絵文字（yomiyasu の EMOJI_PATTERN）。表の状態語に使う ✓ ✔ ✗ ✘ ⚠ は除く。
+export type Severity = 'warn' | 'error' | 'info';
+
+export type LintRule =
+  | 'sentence-length'
+  | 'paragraph-length'
+  | 'verbose'
+  | 'hedge'
+  | 'emphasis'
+  | 'no-chain'
+  | 'halfwidth-space'
+  | 'trailing-colon'
+  | 'slop-word'
+  | 'metaphor-verb'
+  | 'filler'
+  | 'negative-parallel'
+  | 'emoji'
+  | 'redundant-bracket'
+  | 'sentence-end-repeat'
+  | 'excess-bold'
+  | 'excess-list'
+  | 'bold-not-rendered';
+
+/** A lint finding. STE rules leave `severity` unset; yomiyasu rules always set it. */
+export interface LintWarning {
+  line: number;
+  rule: LintRule;
+  message: string;
+  suggestion: string;
+  severity?: Severity;
+}
+
+/** A plain-text sentence used for the sentence-end repetition check. */
+export interface Sentence {
+  line: number;
+  text: string;
+}
+
+/** Character / line counts used for the bold and list frequency checks. */
+export interface TextMetrics {
+  chars: number;
+  lines: number;
+  listLines: number;
+  bold: number;
+}
+
+/** A `**` pair that does not render as bold, with a suggested fix (`suggest` is '' when none). */
+export interface BoldProblem {
+  line: number;
+  found: string;
+  suggest: string;
+  how: string;
+}
+
+interface Pattern {
+  re: RegExp;
+  label: string;
+}
+
+// Emoji (yomiyasu's EMOJI_PATTERN), excluding ✓ ✔ ✗ ✘ ⚠ used as table status words.
 const EMOJI = new RegExp(
   '(?![\\u2713\\u2714\\u2717\\u2718\\u26A0])(?:'
   + '[\\u{1F600}-\\u{1F64F}]|[\\u{1F300}-\\u{1F5FF}]|[\\u{1F680}-\\u{1F6FF}]|[\\u{1F700}-\\u{1F77F}]'
@@ -39,24 +98,24 @@ const EMOJI = new RegExp(
   'gu',
 );
 
-// AI の文章に多い語（yomiyasu の SLOP_WORDS）。
-export const SLOP_WORDS = Object.freeze([
-  // 質感を装う疑似具体語
+// Words common in AI writing (yomiyasu's SLOP_WORDS).
+export const SLOP_WORDS: readonly string[] = Object.freeze([
+  // Pseudo-concrete words that fake texture
   '手触り', '肌感', '肌感覚', '体温', '温度感', '熱量', '血の通った', '泥臭い', '泥臭さ',
-  // 認知・評価を装う語
+  // Words that fake insight or evaluation
   '解像度', '腹落ち', 'メンタルモデル', '本質的', '地に足のついた', '等身大',
-  // 抽象比喩名詞
+  // Abstract metaphorical nouns
   '営み', '装置', '意思決定OS', '土台', '羅針盤', '起爆剤', '触媒',
-  // 体験を大げさにする造語
+  // Coinages that inflate experiences
   '真理', '虚飾', '境地', '美学', '深淵', '冷徹', '禁欲的', '優美', '極致', '宿命',
-  // 2026 年に急に増えた語（文脈によるが要点検）
+  // Words that surged in 2026 (context-dependent, but worth checking)
   '正本',
 ]);
 
-// 比喩の動詞と、AI が好む動詞（yomiyasu の METAPHOR_VERB_PATTERNS）。
+// Metaphorical verbs and verbs AI favors (yomiyasu's METAPHOR_VERB_PATTERNS).
 const KOWARERU = '比喩動詞「壊れる」';
 const SILENTLY = '英語直訳「静かに壊れる (silently fail)」';
-export const METAPHOR_VERBS = Object.freeze([
+export const METAPHOR_VERBS: readonly Pattern[] = Object.freeze([
   { re: /(地味に|よく|じわじわ)効[かきくけいた]/, label: '比喩動詞「効く」の過剰使用' },
   { re: /(データ|仕様|設計|環境|ビルド|システム|秩序)が(静かに)?壊れ/, label: KOWARERU },
   { re: /静かに(壊れ|落ち|失敗|沈黙)/g, label: SILENTLY },
@@ -75,8 +134,8 @@ export const METAPHOR_VERBS = Object.freeze([
   { re: /事例が残した/, label: '非生物主語「事例が残した」' },
 ]);
 
-// 前置きと締めの定型句（yomiyasu の FILLER_PATTERNS）。行の頭か終わりで照合する。
-export const FILLERS = Object.freeze([
+// Stock openers and closers (yomiyasu's FILLER_PATTERNS), matched at the start or end of a line.
+export const FILLERS: readonly Pattern[] = Object.freeze([
   { re: /^(まず|ここで)?重要なのは、?/, label: '前置フィラー「重要なのは」' },
   { re: /^結論から言うと、?/, label: '前置フィラー「結論から言うと」' },
   { re: /^正直に言うと、?/, label: '前置フィラー「正直に言うと」' },
@@ -98,11 +157,11 @@ const DO = {
   negative: '否定を外しても主張が変わらないなら肯定文にする。誤解の訂正や見方の切り替えなら残してよい',
 };
 
-const warn = (line, rule, message, suggestion, severity = 'warn') => ({ line, rule, message, suggestion, severity });
+const warn = (line: number, rule: LintRule, message: string, suggestion: string, severity: Severity = 'warn'): LintWarning => ({ line, rule, message, suggestion, severity });
 
-// 1 行（見出しを除く）の語と言い回しを検査する。text はインラインコードや装飾を取り除いたもの。
-export function checkLine(text, line) {
-  const out = [];
+// Checks the words and phrasing of one line (not a heading). text has inline code and decoration removed.
+export function checkLine(text: string, line: number): LintWarning[] {
+  const out: LintWarning[] = [];
   if (HALFWIDTH_SPACE.test(text)) {
     out.push(warn(line, 'halfwidth-space', '英単語の前後に半角空白があります', '日本語の助詞と空白なしでつなげる'));
   }
@@ -112,17 +171,18 @@ export function checkLine(text, line) {
   for (const word of SLOP_WORDS) {
     if (text.includes(word)) out.push(warn(line, 'slop-word', `AI の文章に多い語「${word}」`, DO.slop));
   }
-  // 「〜が壊れる」と「静かに壊れる」が同じ動詞に二重に当たらないようにする（yomiyasu と同じ）。
-  let kowareru = null;
+  // Keep 「〜が壊れる」 and 「静かに壊れる」 from both hitting the same verb (same as yomiyasu).
+  let kowareru: [number, number] | null = null;
   for (const { re, label } of METAPHOR_VERBS) {
     if (label === SILENTLY && kowareru) {
-      const m = [...text.matchAll(re)].find((x) => !(kowareru[0] <= x.index && x.index + x[0].length <= kowareru[1]));
+      const [ka, kb] = kowareru;
+      const m = [...text.matchAll(re)].find((x) => !(ka <= x.index && x.index + x[0].length <= kb));
       if (m) out.push(warn(line, 'metaphor-verb', `${label}：「${m[0]}」`, DO.metaphor));
       continue;
     }
     const m = text.match(re);
     if (!m) continue;
-    if (label === KOWARERU) kowareru = [m.index, m.index + m[0].length];
+    if (label === KOWARERU && m.index !== undefined) kowareru = [m.index, m.index + m[0].length];
     out.push(warn(line, 'metaphor-verb', `${label}：「${m[0]}」`, DO.metaphor));
   }
   for (const { re, label } of FILLERS) {
@@ -134,21 +194,21 @@ export function checkLine(text, line) {
   return out;
 }
 
-// 絵文字（見出しや表を含むすべての行）。
-export function checkEmoji(raw, line) {
+// Emoji (every line, including headings and tables).
+export function checkEmoji(raw: string, line: number): LintWarning[] {
   const found = raw.match(EMOJI);
   return found ? [warn(line, 'emoji', `絵文字（${found.slice(0, 3).join(' ')}）があります`, '飾りを外し、言葉で書く')] : [];
 }
 
-// 見出しの、情報の増えない補足のかっこ。
-export function checkHeading(text, line) {
+// Parenthetical asides in headings that add no information.
+export function checkHeading(text: string, line: number): LintWarning[] {
   return REDUNDANT_BRACKET.test(text) ? [warn(line, 'redundant-bracket', '見出しに情報の増えない補足のかっこがあります', 'かっこを削る')] : [];
 }
 
-// 文末の種類が 3 文以上続くところ。sentences は文書の順に並べた { line, text }。
-export function checkSentenceEnds(sentences) {
-  const out = [];
-  let prev = null;
+// Places where the same sentence ending repeats 3+ times. sentences are { line, text } in document order.
+export function checkSentenceEnds(sentences: readonly Sentence[]): LintWarning[] {
+  const out: LintWarning[] = [];
+  let prev: string | null = null;
   let count = 1;
   for (const { line, text } of sentences) {
     const end = endKind(text.replace(/[。！？\s]+$/, ''));
@@ -163,14 +223,14 @@ export function checkSentenceEnds(sentences) {
   return out;
 }
 
-// yomiyasu と同じ順で文末の種類を決める。
-function endKind(s) {
+// Determines the sentence-ending kind, checking in the same order as yomiyasu.
+function endKind(s: string): string | null {
   return SENTENCE_ENDS.find((e) => s.endsWith(e)) ?? null;
 }
 
-// 太字と箇条書きの頻度。地の文が 300 字を超えるときだけ見る。
-export function checkMetrics({ chars, lines, listLines, bold }, line = 1) {
-  const out = [];
+// Bold and list frequency. Only checked when the body text exceeds 300 characters.
+export function checkMetrics({ chars, lines, listLines, bold }: TextMetrics, line = 1): LintWarning[] {
+  const out: LintWarning[] = [];
   if (chars <= 300) return out;
   const perThousand = Math.round((bold / chars) * 1000 * 100) / 100;
   const ratio = lines ? listLines / lines : 0;
@@ -183,30 +243,34 @@ export function checkMetrics({ chars, lines, listLines, bold }, line = 1) {
   return out;
 }
 
-// AI っぽさのスコア（yomiyasu と同じく 100 点から warn と error を 5 点、info を 2 点ずつ引く）。
-export function aiScore(warnings) {
+// AI-likeness score: like yomiyasu, start at 100 and subtract 5 per warn/error and 2 per info.
+export function aiScore(warnings: readonly Pick<LintWarning, 'severity'>[]): number {
   const penalty = warnings.filter((w) => w.severity).reduce((n, w) => n + (w.severity === 'info' ? 2 : 5), 0);
   return Math.max(0, 100 - penalty);
 }
 
-// ---- 太字が表示されるか（yomiyasu の bold_problems）----
-// ** のすぐ内側が記号（「」（）` など）で、すぐ外側が文字だと、** を太字の印として読まず、** がそのまま表示される。
-// 新しい CommonMark（記号に Unicode の S も入る）でも、GitHub の GFM（P だけ）でも太字になる形だけを「表示される」とみなす。
-// 直し方の案は、かっこの内側だけを太字にする → 句読点を太字の外に出す → 文字に接する側に半角スペースを入れる、の順に試す。
+// ---- Whether bold renders (yomiyasu's bold_problems) ----
+// When the character just inside ** is punctuation (「」（）` etc.) and the one just outside is a letter, ** is not
+// treated as a bold marker and is shown literally. Only forms that render bold in both newer CommonMark (Unicode S
+// counts as punctuation) and GitHub GFM (P only) count as rendered.
+// Fix suggestions are tried in order: bold only inside the brackets -> move punctuation outside the bold -> add a
+// half-width space on the side touching a letter.
 
 const ASCII_PUNCT = new Set('!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~');
-const BRACKETS = { '「': '」', '『': '』', '（': '）', '(': ')', '【': '】', '〔': '〕', '［': '］', '[': ']', '〈': '〉', '《': '》', '“': '”', '‘': '’', '＜': '＞' };
+const BRACKETS: Record<string, string> = { '「': '」', '『': '』', '（': '）', '(': ')', '【': '】', '〔': '〕', '［': '］', '[': ']', '〈': '〉', '《': '》', '“': '”', '‘': '’', '＜': '＞' };
 
-const isWs = (ch) => ch === '' || /^\s$/u.test(ch);
-const punctGfm = (ch) => ch !== '' && (ASCII_PUNCT.has(ch) || /^\p{P}$/u.test(ch));
-const punctNew = (ch) => ch !== '' && /^[\p{P}\p{S}]$/u.test(ch);
-const canOpen = (prev, nxt) => [punctGfm, punctNew].every((p) => !isWs(nxt) && (!p(nxt) || isWs(prev) || p(prev)));
-const canClose = (prev, nxt) => [punctGfm, punctNew].every((p) => !isWs(prev) && (!p(prev) || isWs(nxt) || p(nxt)));
-const at = (s, p) => (p >= 0 && p < s.length ? s[p] : '');
+const isWs = (ch: string | undefined): boolean => ch === '' || /^\s$/u.test(String(ch));
+const punctGfm = (ch: string): boolean => ch !== '' && (ASCII_PUNCT.has(ch) || /^\p{P}$/u.test(ch));
+const punctNew = (ch: string): boolean => ch !== '' && /^[\p{P}\p{S}]$/u.test(ch);
+const canOpen = (prev: string, nxt: string): boolean => [punctGfm, punctNew].every((p) => !isWs(nxt) && (!p(nxt) || isWs(prev) || p(prev)));
+const canClose = (prev: string, nxt: string): boolean => [punctGfm, punctNew].every((p) => !isWs(prev) && (!p(prev) || isWs(nxt) || p(nxt)));
+const at = (s: string, p: number): string => (p >= 0 && p < s.length ? s[p] : '');
 
-function codeSpans(text) {
-  const runs = [...text.matchAll(/`+/g)].map((m) => [m.index, m.index + m[0].length]);
-  const spans = [];
+type Span = [start: number, end: number];
+
+function codeSpans(text: string): Span[] {
+  const runs = [...text.matchAll(/`+/g)].map((m): Span => [m.index, m.index + m[0].length]);
+  const spans: Span[] = [];
   for (let k = 0; k < runs.length; k++) {
     const [s, e] = runs[k];
     for (let m = k + 1; m < runs.length; m++) {
@@ -220,26 +284,26 @@ function codeSpans(text) {
   return spans;
 }
 
-export function boldPairs(text) {
+export function boldPairs(text: string): Span[] {
   const code = codeSpans(text);
-  const pos = [];
+  const pos: number[] = [];
   for (const m of text.matchAll(/(?<!\*)\*\*(?!\*)/g)) {
     const p = m.index;
     if (code.some(([a, b]) => a <= p && p < b)) continue;
-    const bs = text.slice(0, p).match(/\\*$/)[0].length;
+    const bs = text.slice(0, p).match(/\\*$/)?.[0].length ?? 0;
     if (bs % 2 === 1) continue;
     pos.push(p);
   }
-  const pairs = [];
-  const used = new Set();
-  // 1 段目：** の前後の空白で開き・閉じを決め、スタックで組にする。
-  const stack = [];
+  const pairs: Span[] = [];
+  const used = new Set<number>();
+  // Pass 1: decide opener/closer from whitespace around **, then pair them with a stack.
+  const stack: number[] = [];
   for (const p of pos) {
     const open = !isWs(at(text, p + 2));
     const close = !isWs(at(text, p - 1));
     if (close && stack.length) {
       const opener = stack.pop();
-      if (opener + 2 < p) {
+      if (opener !== undefined && opener + 2 < p) {
         pairs.push([opener, p]);
         used.add(opener);
         used.add(p);
@@ -248,7 +312,7 @@ export function boldPairs(text) {
       stack.push(p);
     }
   }
-  // 2 段目：内側の空白のせいで開き・閉じにならなかった候補を組にする。
+  // Pass 2: pair candidates that failed to open/close only because of inner whitespace.
   const unpaired = pos.filter((p) => !used.has(p));
   let idx = 0;
   while (idx < unpaired.length - 1) {
@@ -269,9 +333,9 @@ export function boldPairs(text) {
   return pairs.sort((a, b) => a[0] - b[0]);
 }
 
-const pairOk = (text, i, j) => canOpen(at(text, i - 1), at(text, i + 2)) && canClose(at(text, j - 1), at(text, j + 2));
+const pairOk = (text: string, i: number, j: number): boolean => canOpen(at(text, i - 1), at(text, i + 2)) && canClose(at(text, j - 1), at(text, j + 2));
 
-function closeOf(s) {
+function closeOf(s: string): number {
   const o = s[0];
   const c = BRACKETS[o];
   let depth = 0;
@@ -282,13 +346,13 @@ function closeOf(s) {
   return -1;
 }
 
-function boldFix(text, i, j, k) {
+function boldFix(text: string, i: number, j: number, k: number): { middle: string | null; how: string } {
   const inner = text.slice(i + 2, j);
-  const tries = [];
+  const tries: [middle: string, how: string][] = [];
   if (inner.length >= 3 && BRACKETS[inner[0]] && closeOf(inner) === inner.length - 1) {
     tries.push([`${inner[0]}**${inner.slice(1, -1)}**${inner.at(-1)}`, 'かっこの内側だけを太字にする']);
   }
-  if (inner.length >= 2 && '。、．，！？!?'.includes(inner.at(-1))) {
+  if (inner.length >= 2 && '。、．，！？!?'.includes(inner.at(-1) ?? '')) {
     tries.push([`**${inner.slice(0, -1)}**${inner.at(-1)}`, '句読点を太字の外に出す']);
   }
   const body = isWs(at(text, i + 2)) || isWs(at(text, j - 1)) ? inner.trim() : inner;
@@ -298,19 +362,19 @@ function boldFix(text, i, j, k) {
   for (const [middle, how] of tries) {
     const cand = text.slice(0, i) + middle + text.slice(j + 2);
     const pairs = boldPairs(cand);
-    if (k < pairs.length && pairOk(cand, ...pairs[k])) return { middle, how };
+    if (k < pairs.length && pairOk(cand, pairs[k][0], pairs[k][1])) return { middle, how };
   }
   return { middle: null, how: '手で直す' };
 }
 
-// 行のリストの印と引用の深さ、その内側の内容。
-function lineContainers(line) {
+// A line's list marker, quote depth, and the content inside them.
+function lineContainers(line: string): { isList: boolean; depth: number; content: string } {
   const list = line.match(/^\s{0,3}(?:[*+-]|\d+[.)])\s+/);
   const rem = list ? line.slice(list[0].length) : line;
   let depth = 0;
   let p = 0;
   for (;;) {
-    p += rem.slice(p).match(/^\s{0,3}/)[0].length;
+    p += rem.slice(p).match(/^\s{0,3}/)?.[0].length ?? 0;
     if (rem[p] !== '>') break;
     depth++;
     p++;
@@ -319,24 +383,28 @@ function lineContainers(line) {
   return { isList: Boolean(list), depth, content: rem.slice(p) };
 }
 
-// 長い太字は、直すところ（両端）だけを見せる。文字数はコードポイントで数える（yomiyasu と同じ）。
-const short = (s) => {
+// For long bold text, show only the parts to fix (both ends). Length is counted in code points (same as yomiyasu).
+const short = (s: string): string => {
   const cs = Array.from(s);
   return cs.length <= 30 ? s : `${cs.slice(0, 12).join('')}…${cs.slice(-12).join('')}`;
 };
 
-// 太字にならない ** の場所と直し方の案。startLine は text の 1 行目の行番号。
-// コードブロック・インラインコード・HTML の行・先頭の設定部分は見ない。段落・リスト・引用などのブロックごとに、複数行の太字も扱う。
-export function boldProblems(text, { startLine = 1, skipFrontmatter = true } = {}) {
+// Locations of ** that fail to render bold, with fix suggestions. startLine is the line number of text's first line.
+// Code blocks, inline code, HTML lines and leading frontmatter are skipped. Bold spanning lines is handled per block (paragraph, list, quote, ...).
+export function boldProblems(
+  text: unknown,
+  { startLine = 1, skipFrontmatter = true }: { startLine?: number; skipFrontmatter?: boolean } = {},
+): BoldProblem[] {
   const lines = String(text).split('\n');
   let start = 0;
   if (skipFrontmatter && lines[0]?.replace(/\r$/, '') === '---') {
     const end = lines.findIndex((l, n) => n > 0 && l.replace(/\r$/, '') === '---');
     if (end !== -1) start = end + 1;
   }
-  const blocks = [];
-  let cur = [];
-  let fence = null;
+  type NumberedLine = [lineNo: number, text: string];
+  const blocks: NumberedLine[][] = [];
+  let cur: NumberedLine[] = [];
+  let fence: [char: string, length: number] | null = null;
   let curDepth = 0;
   let inTable = false;
   const flush = () => {
@@ -367,10 +435,10 @@ export function boldProblems(text, { startLine = 1, skipFrontmatter = true } = {
       flush();
       continue;
     }
-    // GFM の表の区切り行（外側の | がないものを含む）。直前の行は表の見出し行として別のブロックにする。
+    // GFM table delimiter row (including ones without outer |). The previous line becomes its own block as the header row.
     if (/^\s{0,3}\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(content)) {
-      if (cur.length) {
-        const hdr = cur.pop();
+      const hdr = cur.pop();
+      if (hdr) {
         flush();
         blocks.push([hdr]);
       } else {
@@ -401,7 +469,7 @@ export function boldProblems(text, { startLine = 1, skipFrontmatter = true } = {
       cur.push([lineNo, line]);
       continue;
     }
-    // 引用の深さが変わったら区切る（直前が引用で、今の行の深さが 0 のときは続きとみなす）。
+    // Split when the quote depth changes (a depth-0 line right after a quote counts as a continuation).
     if (cur.length && depth !== curDepth && !(curDepth > 0 && depth === 0)) {
       flush();
       curDepth = depth;
@@ -411,12 +479,12 @@ export function boldProblems(text, { startLine = 1, skipFrontmatter = true } = {
   }
   flush();
 
-  const out = [];
+  const out: BoldProblem[] = [];
   for (const block of blocks) {
     const blockText = block.map(([, l]) => l).join('\n');
     const offsets = [0];
-    for (const [, l] of block.slice(0, -1)) offsets.push(offsets.at(-1) + l.length + 1);
-    const lineOf = (idx) => block[offsets.findLastIndex((o) => o <= idx)][0];
+    for (const [, l] of block.slice(0, -1)) offsets.push((offsets.at(-1) ?? 0) + l.length + 1);
+    const lineOf = (idx: number): number => block[offsets.findLastIndex((o) => o <= idx)][0];
     boldPairs(blockText).forEach(([i, j], k) => {
       if (pairOk(blockText, i, j)) return;
       const { middle, how } = boldFix(blockText, i, j, k);
@@ -433,10 +501,10 @@ export function boldProblems(text, { startLine = 1, skipFrontmatter = true } = {
   return out;
 }
 
-// 警告は 1 行で出すので、複数行にまたがる太字の改行は ↵ で示す。
-const oneLine = (s) => s.replace(/\n/g, '↵');
+// Warnings are printed on one line, so newlines inside multi-line bold are shown as ↵.
+const oneLine = (s: string): string => s.replace(/\n/g, '↵');
 
-export function checkBold(text, startLine) {
+export function checkBold(text: string, startLine: number): LintWarning[] {
   return boldProblems(text, { startLine, skipFrontmatter: false }).map((p) => warn(
     p.line, 'bold-not-rendered', `太字の印（**）が記号に接していて、太字にならず ** がそのまま表示されます：「${oneLine(p.found)}」`,
     p.suggest ? `${p.how}：「${oneLine(p.suggest)}」` : p.how, 'error',

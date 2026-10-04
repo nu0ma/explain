@@ -1,6 +1,9 @@
 import { mdInline } from '../markdown.ts';
 import { esc } from '../svg/text.ts';
 import { ComponentError, contentLines, fields } from './error.ts';
+import type { Component } from './types.ts';
+
+type TimelineItem = { when: string; title: string; detail: string; hi: boolean };
 
 export default {
   name: 'timeline',
@@ -12,7 +15,7 @@ export default {
 - 6 項目以下は横、7 項目以上は縦に並べる。引数 h / v で向きを固定できる。`,
   example: '```timeline\n4/1 | 設計レビュー\n4/8 | 実装\n*4/15 | リリース | 本番に反映\n```',
   render(text, { args }) {
-    const items = contentLines(text).map(({ text: t, line }) => {
+    const items = contentLines(text).map(({ text: t, line }): TimelineItem => {
       const parts = fields(t);
       if (parts.length < 2 || !parts[1]) throw new ComponentError(`timeline の行は 時期 | 見出し | 説明 の形で書いてください："${t}"`, line);
       const hi = parts[0].startsWith('*');
@@ -25,4 +28,4 @@ export default {
       ? `<ol class="am-timeline am-timeline--v">${lis.join('')}</ol>`
       : `<ol class="am-timeline am-timeline--h" style="--n: ${items.length}">${lis.join('')}</ol>`;
   },
-};
+} satisfies Component;

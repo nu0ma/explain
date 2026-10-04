@@ -1,5 +1,6 @@
-// ナレーションの音声。macOSのsayで読み上げる。--voice offなら音声を作らず、字幕だけにする。
-// 1 文ごとの合成結果は 22050 Hz・モノラル・16 ビット PCM。文と声の組で EXPLAIN_HOME/cache/tts/ にキャッシュし、再描画では合成し直さない。
+// Narration audio, read aloud by macOS say. With --voice off, no audio is made and only captions are shown.
+// Each sentence is synthesized as 22050 Hz mono 16-bit PCM and cached in EXPLAIN_HOME/cache/tts/ by sentence and voice,
+// so re-rendering does not synthesize again.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, readdirSync, statSync, utimesSync } from 'node:fs';
@@ -7,20 +8,47 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const SAMPLE_RATE = 22050;
-// キャッシュの上限。22050 Hz・16 ビットで約 75 分ぶん。超えたら最後に使った時刻が古いものから消す。
+// Cache size limit: about 75 minutes at 22050 Hz 16-bit. Above it, the least recently used files are removed.
 export const CACHE_MAX_BYTES = 200 * 1024 * 1024;
-// say：macOSのsayで読み上げる（既定）。off：音声を作らず、字幕だけにする。
+// say: read aloud with macOS say (default). off: no audio, captions only.
 export const VOICES = ['say', 'off'];
 
+export interface TtsProvider {
+  name: string;
+  id: string;
+  concurrency?: number;
+  synth: (text: string) => Promise<Int16Array>;
+}
+
+export interface EncodedAudio {
+  mime: string;
+  data: Buffer;
+}
+
+export interface CacheFile {
+  path: string;
+  size: number;
+  mtime: number;
+}
+
+interface WavFormat {
+  channels: number;
+  rate: number;
+  bits: number;
+}
+
 export class TtsError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'TtsError';
   }
 }
 
-// 使う音声を選ぶ。{ name, synth(text) → Int16Array }か、字幕だけならnullを返す。
-export function pickProvider(choice, { platform = process.platform, which = hasCommand } = {}) {
+// Picks the voice to use. Returns a provider, or null for captions only.
+export function pickProvider(
+  choice: string,
+  { platform = process.platform, which = hasCommand }: { platform?: NodeJS.Platform; which?: (cmd: string) => boolean } = {},
+): TtsProvider | null {
   if (choice === 'off') return null;
   if (platform !== 'darwin' || !which('say')) {
     throw new TtsError('ナレーションの音声にはmacOSのsayが必要です');
@@ -30,7 +58,7 @@ export function pickProvider(choice, { platform = process.platform, which = hasC
     name: 'say',
     id: `say:${voice ?? 'default'}`,
     concurrency: 4,
-    // 文は引数で渡さず、ファイルから読ませる。「-」で始まる文をsayがオプションとして解釈しないようにするため。
+    // Pass the text through a file, not an argument, so say does not parse text starting with "-" as an option.
     synth: (text) => withTemp(async (file) => {
       const input = file.replace(/\.wav$/, '.txt');
       writeFileSync(input, text);
@@ -40,37 +68,37 @@ export function pickProvider(choice, { platform = process.platform, which = hasC
   };
 }
 
-// macOS の日本語の声を選ぶ。ja_JP の声を MAC_JA_VOICES の順で探す。
+// Picks a Japanese macOS voice, searching ja_JP voices in MAC_JA_VOICES order.
 export const MAC_JA_VOICES = Object.freeze(['Kyoko', 'Eddy', 'Flo', 'Reed']);
 
-export function macVoice() {
+export function macVoice(): string | undefined {
   return pickMacVoice(spawnSync('say', ['-v', '?'], { encoding: 'utf8' }).stdout || '');
 }
 
-// say -v '?' の出力を解析する。名前が長いと、名前と言語コードの間が空白 1 つだけになることがある。
-// 優先リストの声がなければ ja_JP の最初の声を使い、ja_JP の声がなければ undefined（OS の既定の声）を返す。
-export function pickMacVoice(out) {
-  const list = out.split('\n').map((l) => l.match(/^(.+?)\s+([a-z]{2}_[A-Z]{2})\s+#/)).filter(Boolean).map((m) => ({ name: m[1].trim(), locale: m[2] }));
+// Parses the output of say -v '?'. A long name may be separated from the locale by a single space.
+// Falls back to the first ja_JP voice when no preferred voice exists, and to undefined (the OS default voice) when no ja_JP voice exists.
+export function pickMacVoice(out: string): string | undefined {
+  const list = out.split('\n').map((l) => l.match(/^(.+?)\s+([a-z]{2}_[A-Z]{2})\s+#/)).filter((m): m is RegExpMatchArray => m !== null).map((m) => ({ name: m[1].trim(), locale: m[2] }));
   const ja = list.filter((v) => v.locale === 'ja_JP');
-  const base = (name) => name.replace(/\s*[(（].*$/, '');
+  const base = (name: string) => name.replace(/\s*[(（].*$/, '');
   return (MAC_JA_VOICES.map((p) => ja.find((v) => base(v.name) === p)).find(Boolean) ?? ja[0])?.name;
 }
 
-export function hasCommand(cmd) {
+export function hasCommand(cmd: string): boolean {
   return spawnSync(process.platform === 'win32' ? 'where' : 'which', [cmd], { stdio: 'ignore' }).status === 0;
 }
 
-function run(cmd, args) {
-  return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
+function run(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     p.stderr.on('data', (d) => { err += d; });
     p.on('error', reject);
     p.on('close', (code) => (code === 0 ? resolve() : reject(new TtsError(`${cmd} が失敗しました（${code}）：${err.slice(0, 200)}`))));
-  }));
+  });
 }
 
-async function withTemp(fn) {
+async function withTemp<T>(fn: (file: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'explain-tts-'));
   try {
     return await fn(join(dir, 'out.wav'));
@@ -79,11 +107,11 @@ async function withTemp(fn) {
   }
 }
 
-// 16 ビット PCM の WAV を読む。多チャンネルなら最初のチャンネルを使う。
-export function readWav(buf) {
+// Reads a 16-bit PCM WAV. For multichannel audio, uses the first channel.
+export function readWav(buf: Buffer): Int16Array {
   if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') throw new TtsError('WAV ファイルではありません');
   let pos = 12;
-  let fmt = null;
+  let fmt: WavFormat | null = null;
   while (pos + 8 <= buf.length) {
     const id = buf.toString('ascii', pos, pos + 4);
     const size = buf.readUInt32LE(pos + 4);
@@ -100,8 +128,8 @@ export function readWav(buf) {
   throw new TtsError('WAV に data チャンクがありません');
 }
 
-// 線形補間で SAMPLE_RATE にリサンプリングする。
-function resample(input) {
+// Resamples to SAMPLE_RATE with linear interpolation.
+function resample(input: Int16Array | { rate: number; samples: Int16Array }): Int16Array {
   if (input instanceof Int16Array) return input;
   const { rate, samples } = input;
   const n = Math.floor((samples.length * SAMPLE_RATE) / rate);
@@ -115,15 +143,14 @@ function resample(input) {
   return out;
 }
 
-// すべてのナレーションを合成する（キャッシュと並列数の上限つき）。texts と同じ長さの Int16Array の配列を返す。
-/**
- * @param {string[]} texts
- * @param {{ id: string, concurrency?: number, synth: (text: string) => Promise<Int16Array> }} provider
- * @param {{ cacheDir?: string }} [options]
- */
-export async function synthAll(texts, provider, { cacheDir } = {}) {
+// Synthesizes all narration, with caching and a concurrency limit. Returns one Int16Array per text.
+export async function synthAll(
+  texts: readonly string[],
+  provider: Pick<TtsProvider, 'id' | 'concurrency' | 'synth'>,
+  { cacheDir }: { cacheDir?: string } = {},
+): Promise<Int16Array[]> {
   if (cacheDir) mkdirSync(cacheDir, { recursive: true });
-  const results = new Array(texts.length);
+  const results: Int16Array[] = [];
   let next = 0;
   const worker = async () => {
     while (next < texts.length) {
@@ -132,12 +159,13 @@ export async function synthAll(texts, provider, { cacheDir } = {}) {
       if (file && existsSync(file)) {
         const buf = readFileSync(file);
         const now = new Date();
-        utimesSync(file, now, now); // 最後に使った時刻を残し、上限を超えたときに消す順を決める。
+        utimesSync(file, now, now); // Record the last use, which decides the removal order when over the limit.
         results[i] = new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2).slice();
         continue;
       }
-      results[i] = trimSilence(await provider.synth(texts[i]));
-      if (file) writeFileSync(file, Buffer.from(results[i].buffer, results[i].byteOffset, results[i].byteLength));
+      const clip = trimSilence(await provider.synth(texts[i]));
+      results[i] = clip;
+      if (file) writeFileSync(file, Buffer.from(clip.buffer, clip.byteOffset, clip.byteLength));
     }
   };
   await Promise.all(Array.from({ length: Math.min(provider.concurrency ?? 2, texts.length) }, worker));
@@ -145,8 +173,8 @@ export async function synthAll(texts, provider, { cacheDir } = {}) {
   return results;
 }
 
-// キャッシュの音声ファイルの一覧（古い順）と合計のバイト数。
-export function cacheStats(cacheDir) {
+// Lists cached audio files (oldest first) with their total size in bytes.
+export function cacheStats(cacheDir: string): { files: CacheFile[]; bytes: number } {
   if (!existsSync(cacheDir)) return { files: [], bytes: 0 };
   const files = readdirSync(cacheDir)
     .filter((name) => name.endsWith('.pcm'))
@@ -159,8 +187,8 @@ export function cacheStats(cacheDir) {
   return { files, bytes: files.reduce((n, f) => n + f.size, 0) };
 }
 
-// 合計が maxBytes を超えていたら、最後に使った時刻が古いものから消す。消したファイルの数を返す。
-export function pruneCache(cacheDir, maxBytes = CACHE_MAX_BYTES) {
+// While the total exceeds maxBytes, removes the least recently used files. Returns the number removed.
+export function pruneCache(cacheDir: string, maxBytes = CACHE_MAX_BYTES): number {
   let { files, bytes } = cacheStats(cacheDir);
   let removed = 0;
   for (const f of files) {
@@ -172,8 +200,8 @@ export function pruneCache(cacheDir, maxBytes = CACHE_MAX_BYTES) {
   return removed;
 }
 
-// 前後の無音を削り、画面のテンポを実際の音声だけで決める。
-export function trimSilence(samples, threshold = 300) {
+// Trims leading and trailing silence so that only actual speech sets the pace of the screen.
+export function trimSilence(samples: Int16Array, threshold = 300): Int16Array {
   let a = 0;
   let b = samples.length;
   while (a < b && Math.abs(samples[a]) < threshold) a++;
@@ -182,8 +210,8 @@ export function trimSilence(samples, threshold = 300) {
   return samples.slice(Math.max(0, a - pad), Math.min(samples.length, b + pad));
 }
 
-// 各文の音声をタイムラインどおりに 1 本の音声トラックへ置き、WAV にする。
-export function mixTrack(clips, starts, duration) {
+// Places each sentence's audio on one track by the timeline and returns it as WAV.
+export function mixTrack(clips: readonly Int16Array[], starts: readonly number[], duration: number): Buffer {
   const total = Math.ceil(duration * SAMPLE_RATE);
   const track = new Int16Array(total);
   clips.forEach((clip, i) => {
@@ -193,9 +221,9 @@ export function mixTrack(clips, starts, duration) {
   return wav(track);
 }
 
-// 埋め込む音声を AAC（m4a）に圧縮する。WAV のままだと 1 秒あたり約 44 KB になる。
-// ffmpeg がないときや失敗したときは null を返し、呼び出し側は WAV のまま使う。
-export async function compressAudio(wavBuf, { has = hasCommand } = {}) {
+// Compresses the embedded audio to AAC (m4a). Plain WAV takes about 44 KB per second.
+// Returns null when ffmpeg is missing or fails, and the caller then keeps the WAV.
+export async function compressAudio(wavBuf: Buffer, { has = hasCommand }: { has?: (cmd: string) => boolean } = {}): Promise<EncodedAudio | null> {
   if (!has('ffmpeg')) return null;
   return withTemp(async (file) => {
     const src = file.replace(/\.wav$/, '-in.wav');
@@ -210,7 +238,7 @@ export async function compressAudio(wavBuf, { has = hasCommand } = {}) {
   });
 }
 
-export function wav(samples) {
+export function wav(samples: Int16Array): Buffer {
   const buf = Buffer.alloc(44 + samples.length * 2);
   buf.write('RIFF', 0);
   buf.writeUInt32LE(36 + samples.length * 2, 4);

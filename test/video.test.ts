@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.ts';
 import { renderVideo, captionHtml, videoMode, VIDEO_UI } from '../src/video/render.ts';
+import type { RenderVideoOptions } from '../src/video/render.ts';
 import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, compressAudio, hasCommand, cacheStats, pruneCache, TtsError, SAMPLE_RATE } from '../src/video/tts.ts';
+import type { TtsProvider } from '../src/video/tts.ts';
 import { findChrome } from '../src/video/export.ts';
 import { renderDoc } from '../src/render.ts';
 import { ParseError } from '../src/parse.ts';
@@ -14,7 +16,7 @@ import { COMPONENTS } from '../src/components/index.ts';
 import { main } from '../src/cli.ts';
 import { SIMPLIFIED_ONLY } from './helpers/chinese.ts';
 
-let dir;
+let dir: string;
 before(() => { dir = mkdtempSync(join(tmpdir(), 'explain-video-')); });
 after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -36,15 +38,15 @@ B -> A: ACK
 > 1 文だけ。
 `;
 
-// 偽の音声：1 字 0.1 秒の正弦波。呼ばれた回数を記録する。
+// Fake voice: a sine wave of 0.1 seconds per character. Records each call.
 function fakeProvider() {
-  const calls = [];
+  const calls: string[] = [];
   return {
     calls,
     name: 'fake',
     id: 'fake',
     concurrency: 2,
-    async synth(text) {
+    async synth(text: string) {
       calls.push(text);
       const n = Math.round([...text].length * 0.1 * SAMPLE_RATE);
       return Int16Array.from({ length: n }, (_, i) => Math.round(8000 * Math.sin(i / 8)));
@@ -52,7 +54,7 @@ function fakeProvider() {
   };
 }
 
-// ── 原稿の解析 ──
+// ── Script parsing ──
 test('parseVideo: 場面・ナレーションの拍・カメラの対象・タイトルのナレーション', () => {
   const v = parseVideo(SRC);
   assert.equal(v.meta.title, 'ハンドシェイク');
@@ -60,7 +62,8 @@ test('parseVideo: 場面・ナレーションの拍・カメラの対象・タ�
   assert.equal(v.scenes.length, 2);
   assert.deepEqual(v.scenes[0].beats.map((b) => b.text), ['A が先に SYN を送る。', 'B が ACK を返す。']);
   assert.equal(v.scenes[0].beats[1].focus, 'B');
-  assert.equal(v.scenes[0].blocks[0].lang, 'sequence');
+  const first = v.scenes[0].blocks[0];
+  assert.equal(first.type === 'fence' ? first.lang : undefined, 'sequence');
   assert.equal(v.scenes[1].blocks[0].type, 'md', 'ナレーション以外の Markdown は画面に残す');
   assert.equal(allBeats(v).length, 4);
 });
@@ -93,7 +96,7 @@ test('captionHtml: HTML をエスケープし、[名前] を強調語にする',
   assert.equal(captionHtml('[Server] が <ACK> を返す'), '<b>Server</b> が &lt;ACK&gt; を返す');
 });
 
-// ── 音声 ──
+// ── Audio ──
 test('wav と readWav で往復できる。mixTrack は開始時刻どおりに置く', () => {
   const samples = Int16Array.from([0, 1000, -1000, 32767]);
   assert.deepEqual([...readWav(wav(samples))], [...samples]);
@@ -122,7 +125,7 @@ test('synthAll: 並列に合成してキャッシュし、2 回目は TTS を呼
 });
 
 test('pickProvider: offは字幕だけ。sayはmacOSでsayがあるときだけ使え、なければエラー', () => {
-  const cases = [
+  const cases: { name: string; req: Parameters<typeof pickProvider>; want?: null; wantErr?: RegExp }[] = [
     { name: 'off', req: ['off', { platform: 'linux', which: () => false }], want: null },
     { name: 'macOSでsayがない', req: ['say', { platform: 'darwin', which: () => false }], wantErr: /macOSのsayが必要です/ },
     { name: 'macOS以外', req: ['say', { platform: 'linux', which: () => true }], wantErr: /macOSのsayが必要です/ },
@@ -137,7 +140,7 @@ test('pickProvider: offは字幕だけ。sayはmacOSでsayがあるときだけ�
 });
 
 test('pickMacVoice: ja_JP の声を Kyoko → Eddy → Flo → Reed の順で選ぶ', () => {
-  const line = (name, locale) => `${name.padEnd(20)}${locale}    # x`;
+  const line = (name: string, locale: string) => `${name.padEnd(20)}${locale}    # x`;
   const cases = [
     { name: 'Kyoko がいる', req: [line('Reed (日本語（日本）)', 'ja_JP'), line('Kyoko', 'ja_JP'), line('Samantha', 'en_US')], want: 'Kyoko' },
     { name: 'Kyoko がいない', req: [line('Reed (日本語（日本）)', 'ja_JP'), line('Flo (日本語（日本）)', 'ja_JP'), line('Eddy (日本語（日本）)', 'ja_JP')], want: 'Eddy (日本語（日本）)' },
@@ -148,13 +151,13 @@ test('pickMacVoice: ja_JP の声を Kyoko → Eddy → Flo → Reed の順で選
   for (const { name, req, want } of cases) assert.equal(pickMacVoice(req.join('\n')), want, name);
 });
 
-// ── 描画 ──
+// ── Rendering ──
 test('renderVideo: 音声なしでは見積もりの長さで再生ページを作り、場面とデータがそろう', async () => {
   const r = await renderVideo(SRC);
   assert.equal(r.wav, null);
   assert.equal(r.beats, 4);
   assert.equal((r.html.match(/<section class="amv-scene/g) || []).length, 3, 'タイトル + 場面 2 つ');
-  const data = JSON.parse(r.html.match(/id="amv-data">(.*?)<\/script>/)[1]);
+  const data = JSON.parse(/id="amv-data">(.*?)<\/script>/.exec(r.html)?.[1] ?? '');
   assert.equal(data.segments.length, 3);
   assert.equal(data.segments[1].beats[1].html, '<b>B</b> が ACK を返す。');
   assert.equal(data.duration, r.duration);
@@ -168,9 +171,10 @@ test('renderVideo: 音声ありでは長さを音声から取り、WAV を埋め
   const r = await renderVideo(SRC, { provider: p });
   assert.equal(p.calls.length, 4);
   assert.match(r.html, /<audio id="amv-audio" preload="auto" src="data:audio\/wav;base64,/);
-  const data = JSON.parse(r.html.match(/id="amv-data">(.*?)<\/script>/)[1]);
+  const data = JSON.parse(/id="amv-data">(.*?)<\/script>/.exec(r.html)?.[1] ?? '');
   const first = data.segments[0].beats[0];
   assert.ok(Math.abs(first.end - first.start - [...'タイトルのナレーション。'].length * 0.1) < 0.01);
+  assert.ok(r.wav);
   assert.equal(readWav(r.wav).length, Math.ceil(r.duration * SAMPLE_RATE));
 });
 
@@ -210,17 +214,22 @@ test('renderDoc: template video なら explain video を使うよう案内する
   assert.throws(() => renderDoc('---\ntemplate: video\n---\n## A\n文字\n'), (e) => e instanceof ParseError && /explain video/.test(e.message));
 });
 
-// ── 部品の手順の印 ──
+// ── Component step markers ──
 test('部品の手順の印：flow はソースの行、sequence はメッセージ、tree はノードごと', () => {
   const ctx = { args: '', uid: () => 'u' };
-  const flow = COMPONENTS.get('flow').render('A -> B\nB -> C: ラベル', ctx);
+  const component = (name: string) => {
+    const c = COMPONENTS.get(name);
+    if (!c) throw new Error(`unknown component ${name}`);
+    return c;
+  };
+  const flow = component('flow').render('A -> B\nB -> C: ラベル', ctx);
   assert.match(flow, /data-key="A" data-step="0"/);
   assert.match(flow, /data-key="C" data-step="1"/);
   assert.equal((flow.match(/<g data-step="/g) || []).length, 2, '矢印 1 本に手順のグループ 1 つ');
-  const seq = COMPONENTS.get('sequence').render('A -> B: x\nB --> A: y', ctx);
+  const seq = component('sequence').render('A -> B: x\nB --> A: y', ctx);
   assert.match(seq, /<g data-key="A">/);
   assert.match(seq, /<g data-step="1">/);
-  const tree = COMPONENTS.get('tree').render('根\n  子その一\n  子その二', ctx);
+  const tree = component('tree').render('根\n  子その一\n  子その二', ctx);
   assert.match(tree, /data-key="子その二" data-step="2"/);
 });
 
@@ -231,7 +240,15 @@ function sink() {
   return { stream, get text() { return text; } };
 }
 
-async function run(args, { stdin = '', env = {}, ttsProvider = null, encodeAudio = null } = {}) {
+async function run(
+  args: string[],
+  { stdin = '', env = {}, ttsProvider = null, encodeAudio = null }: {
+    stdin?: string;
+    env?: Record<string, string>;
+    ttsProvider?: TtsProvider | null;
+    encodeAudio?: RenderVideoOptions['encodeAudio'];
+  } = {},
+) {
   const out = sink();
   const err = sink();
   const code = await main(args, {
@@ -270,11 +287,12 @@ test('findChrome: EXPLAIN_CHROME を優先する', () => {
   assert.equal(findChrome({ EXPLAIN_CHROME: '/x/chrome' }), '/x/chrome');
 });
 
-// ── 端から端まで：実際の OS の読み上げ + Chrome + ffmpeg。遅いので EXPLAIN_E2E=1 のときだけ動かす。──
+// ── End to end: real OS speech + Chrome + ffmpeg. Slow, so it runs only with EXPLAIN_E2E=1. ──
 const E2E = process.env.EXPLAIN_E2E === '1';
 
 test('e2e: macOSのsayで実際の音声を合成する', { skip: !E2E }, async () => {
   const p = pickProvider('say');
+  assert.ok(p);
   const [clip] = await synthAll(['こんにちは、世界。'], p, {});
   assert.ok(clip.length / SAMPLE_RATE > 0.4);
 });
@@ -307,7 +325,8 @@ test('renderVideo: encodeAudio が返した形式で埋め込み、null なら W
   for (const { name, encodeAudio, want } of cases) {
     const r = await renderVideo(SRC, { provider: fakeProvider(), encodeAudio });
     assert.ok(r.html.includes(want), name);
-    assert.equal(readWav(r.wav).length, Math.ceil(r.duration * SAMPLE_RATE), name);
+    assert.ok(r.wav);
+  assert.equal(readWav(r.wav).length, Math.ceil(r.duration * SAMPLE_RATE), name);
   }
 });
 
@@ -316,6 +335,7 @@ test('compressAudio: ffmpeg がなければ null。あれば AAC（m4a）にし�
   const samples = Int16Array.from({ length: SAMPLE_RATE * 2 }, (_, i) => Math.round(Math.sin(i / 10) * 8000));
   const src = wav(samples);
   const got = await compressAudio(src);
+  assert.ok(got);
   assert.equal(got.mime, 'audio/mp4');
   assert.equal(got.data.toString('ascii', 4, 8), 'ftyp');
   assert.ok(got.data.length < src.length / 3, `${got.data.length} < ${src.length / 3}`);
@@ -335,7 +355,7 @@ test('pruneCache: 上限を超えたら最後に使った時刻が古いもの�
   assert.equal(files.length, 3);
   const old = new Date(Date.now() - 60_000);
   for (const f of files) utimesSync(f.path, old, old);
-  await synthAll(['一'], p, { cacheDir: cache }); // 「一」を使い直して新しくする
+  await synthAll(['一'], p, { cacheDir: cache }); // reuse "一" to make it the most recent
   const size = files[0].size;
   const cases = [
     { name: '上限内', max: size * 3, wantRemoved: 0, wantLeft: 3 },
@@ -365,7 +385,9 @@ test('cli cache: 場所と大きさを出し、clear で消す。知らない操
 
 test('e2e: sayは「-」で始まる文もオプションではなく読み上げる文として扱う', { skip: !E2E }, async () => {
   const out = join(dir, 'injected.aiff');
-  const [clip] = await synthAll([`--output-file=${out} こんにちは`], pickProvider('say'), {});
+  const p = pickProvider('say');
+  assert.ok(p);
+  const [clip] = await synthAll([`--output-file=${out} こんにちは`], p, {});
   assert.ok(clip.length > 0);
   assert.equal(existsSync(out), false, '文で指定した場所にファイルを書かない');
 });

@@ -1,15 +1,17 @@
-// SVG のレイアウトは Node 側で計算するため、実際のフォントの寸法は取れない。文字の種類ごとに幅を見積もる。
-// 見積もりは狭いより広いほうが安全。ノードに余白が出ても、文字が枠からはみ出すよりよい。
+// SVG layout is computed in Node, so real font metrics are not available. Estimate the width per character class.
+// Overestimating is safer: extra padding in a node is better than text overflowing its box.
 
-const CJK_RE = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\u3000-\u303F]/;
-const NARROW = new Set([...'iljtfrI.,:;|!\'`()[]{}']);
-const WIDE = new Set([...'mwMWOQGD@%&']);
+const CJK_RE = /[⺀-鿿가-힯豈-﫿︰-﹏＀-￯　-〿]/;
+const NARROW = new Set('iljtfrI.,:;|!\'`()[]{}');
+const WIDE = new Set('mwMWOQGD@%&');
 
-export function isCJK(ch) {
+export type MeasureOptions = { mono?: boolean };
+
+export function isCJK(ch: string): boolean {
   return CJK_RE.test(ch);
 }
 
-function charWidth(ch, mono) {
+function charWidth(ch: string, mono: boolean): number {
   if (isCJK(ch)) return 1;
   if (mono) return 0.6;
   if (ch === ' ') return 0.3;
@@ -19,19 +21,19 @@ function charWidth(ch, mono) {
   return 0.56;
 }
 
-export function measure(str, size = 13, { mono = false } = {}) {
+export function measure(str: unknown, size = 13, { mono = false }: MeasureOptions = {}): number {
   let units = 0;
   for (const ch of String(str ?? '')) units += charWidth(ch, mono);
   return Math.round(units * size * 100) / 100;
 }
 
-// それ以上分けない組版の単位に切る。全角文字は 1 字で 1 単位、連続した空白以外のラテン文字は 1 語で 1 単位。
-function tokenize(str) {
-  return String(str).match(/[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\u3000-\u303F]|[^\s\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\u3000-\u303F]+|\s+/g) ?? [];
+// Split into unbreakable typesetting units: each full-width character is one unit, each run of non-space Latin text is one word.
+function tokenize(str: unknown): string[] {
+  return String(str).match(/[⺀-鿿가-힯豈-﫿︰-﹏＀-￯　-〿]|[^\s⺀-鿿가-힯豈-﫿︰-﹏＀-￯　-〿]+|\s+/g) ?? [];
 }
 
-export function wrap(str, maxWidth, size = 13, opts = {}) {
-  const lines = [];
+export function wrap(str: unknown, maxWidth: number, size = 13, opts: MeasureOptions = {}): string[] {
+  const lines: string[] = [];
   let line = '';
   for (const tok of tokenize(str)) {
     if (/^\s+$/.test(tok)) {
@@ -50,8 +52,8 @@ export function wrap(str, maxWidth, size = 13, opts = {}) {
   return lines;
 }
 
-const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
-export function esc(str) {
+export function esc(str: unknown): string {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 }
