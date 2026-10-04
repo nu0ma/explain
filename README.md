@@ -11,9 +11,7 @@ Say 「図にして」 and get a diagram. Say 「動画で説明して」 and ge
 ![Output: Japanese](https://img.shields.io/badge/output-Japanese-BC002D)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-<a href="docs/demo/dns-resolution.video.mp4"><img src="docs/demo/dns-resolution.hero.gif" alt="explain demo: a narrated video on DNS name resolution, where the flow grows one step per line and the camera follows each server named in the narration" width="800"></a>
-
-<sub>2x speed, no audio. Click for the MP4 with narration.</sub>
+https://github.com/user-attachments/assets/1b36b279-ffea-496c-b2ee-9e6c4d920ac0
 
 </div>
 
