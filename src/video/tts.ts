@@ -4,7 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, readdirSync, statSync, utimesSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 export const SAMPLE_RATE = 22050;
@@ -84,7 +84,8 @@ export function pickProvider(
   return {
     name: 'say',
     get id() { return `say:${voice ?? 'default'}`; },
-    concurrency: 4,
+    // The speech service serializes much of the work, but more processes still help: 16 lines took 6.8 s with 4 and 5.5 s with 8.
+    concurrency: Math.min(8, availableParallelism()),
     refresh,
     // Pass the text through a file, not an argument, so say does not parse text starting with "-" as an option.
     synth: (text) => withTemp(async (file) => {
