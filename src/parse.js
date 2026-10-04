@@ -55,9 +55,10 @@ export function parseDoc(source, { defaults = {}, choices = {} } = {}) {
   const lines = String(source).replace(/\r\n?/g, '\n').split('\n');
   const { meta, bodyStart } = parseFrontmatter(lines, { ...DEFAULT_META, ...defaults }, { ...CHOICES, ...choices });
   const sections = splitSections(lines, bodyStart);
-  const intro = extractTitle(sections.intro, meta);
+  const { intro, titleLine } = extractTitle(sections.intro, meta);
   const panels = assignIds(sections.panels);
-  return { meta, intro, panels };
+  // titleLine：本文の先頭の "# 題名" から題名を取ったときの行番号（frontmatter の title なら null）。
+  return { meta, intro, panels, titleLine };
 }
 
 function parseFrontmatter(lines, base, allowed) {
@@ -158,16 +159,17 @@ export function parseAttrs(text) {
 }
 
 function extractTitle(intro, meta) {
-  if (meta.title || intro[0]?.type !== 'md') return intro;
+  if (meta.title || intro[0]?.type !== 'md') return { intro, titleLine: null };
   const [first, ...rest] = intro;
   const lines = first.text.split('\n');
   const idx = lines.findIndex((l) => l.trim());
   const m = lines[idx]?.match(/^#\s+(.+)$/);
-  if (!m) return intro;
+  if (!m) return { intro, titleLine: null };
   meta.title = m[1].trim();
+  const titleLine = first.line + idx;
   const remaining = lines.slice(idx + 1);
-  if (!remaining.some((l) => l.trim())) return rest;
-  return [{ ...first, text: remaining.join('\n'), line: first.line + idx + 1 }, ...rest];
+  if (!remaining.some((l) => l.trim())) return { intro: rest, titleLine };
+  return { intro: [{ ...first, text: remaining.join('\n'), line: first.line + idx + 1 }, ...rest], titleLine };
 }
 
 function assignIds(panels) {

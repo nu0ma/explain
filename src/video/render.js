@@ -3,7 +3,7 @@
 import { renderBlocks, LintError } from '../render.js';
 import { timestamp } from '../time.js';
 import { pageCss } from '../themes/index.js';
-import { lintDoc } from '../lint/ste.js';
+import { lintDoc, blockingWarnings } from '../lint/ste.js';
 import { esc } from '../svg/text.js';
 import { VERSION, VIDEO_CSS, VIDEO_JS } from '../assets.js';
 import { parseVideo, buildTimeline, estimateSeconds, allBeats, VIDEO_THEMES } from './script.js';
@@ -33,7 +33,7 @@ export async function renderVideo(source, { provider = null, cacheDir, defaults 
 
   // ナレーションは 1 行が 1 拍なので、何行続いても「長すぎる段落」とはみなさない。
   const warnings = meta.style === 'off' ? [] : lintDoc(video.doc).filter((w) => w.rule !== 'paragraph-length');
-  if (meta.style === 'strict' && warnings.length) throw new LintError(warnings);
+  if (meta.style === 'strict' && blockingWarnings(warnings).length) throw new LintError(blockingWarnings(warnings));
 
   const beats = allBeats(video);
   let clips = null;

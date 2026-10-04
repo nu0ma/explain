@@ -8,7 +8,8 @@ import { join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { renderDoc, RenderError, LintError } from './render.js';
 import { parseDoc, ParseError, CHOICES } from './parse.js';
-import { lintDoc, formatWarning } from './lint/ste.js';
+import { lintDoc, formatWarning, blockingWarnings } from './lint/ste.js';
+import { aiScore } from './lint/yomiyasu.js';
 import { COMPONENTS } from './components/index.js';
 import { THEMES } from './themes/index.js';
 import { renderVideo } from './video/render.js';
@@ -336,7 +337,8 @@ function cmdLint(src, opts, { print, fail }) {
   }
   const warnings = style === 'off' ? [] : lintDoc(doc);
   printWarnings(warnings, print, style);
-  return style === 'strict' && warnings.length ? 1 : 0;
+  if (style !== 'off') print(`  AI っぽさのスコア ${aiScore(warnings)}/100（yomiyasu の基準。AI の文章に多い書き方 1 件につき 5 点、参考の件は 2 点を引く）`);
+  return style === 'strict' && blockingWarnings(warnings).length ? 1 : 0;
 }
 
 function printWarnings(warnings, print, style) {

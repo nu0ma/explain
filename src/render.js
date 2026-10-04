@@ -5,7 +5,7 @@ import { md } from './markdown.js';
 import { COMPONENTS, RAW_LANGS, ComponentError } from './components/index.js';
 import { TEMPLATES } from './templates/index.js';
 import { pageCss } from './themes/index.js';
-import { lintDoc } from './lint/ste.js';
+import { lintDoc, blockingWarnings } from './lint/ste.js';
 import { esc } from './svg/text.js';
 import { VERSION, RUNTIME_JS } from './assets.js';
 import { timestamp } from './time.js';
@@ -51,7 +51,7 @@ export function renderDoc(source, overrides = {}, defaults = {}) {
   if (isStatic) doc.meta.mode = 'auto';
 
   const warnings = doc.meta.style === 'off' ? [] : lintDoc(doc);
-  if (doc.meta.style === 'strict' && warnings.length) throw new LintError(warnings);
+  if (doc.meta.style === 'strict' && blockingWarnings(warnings).length) throw new LintError(blockingWarnings(warnings));
 
   const stats = { panels: doc.panels.length, components: {} };
   const ctx = { seq: 0, stats };

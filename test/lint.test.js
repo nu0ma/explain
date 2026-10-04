@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDoc } from '../src/parse.js';
+import { readFileSync } from 'node:fs';
 import { lintDoc, splitSentences, sentenceLength, formatWarning } from '../src/lint/ste.js';
+import { aiScore, boldProblems } from '../src/lint/yomiyasu.js';
+import { renderDoc } from '../src/render.js';
 
 const lint = (body) => lintDoc(parseDoc(body));
 const rules = (ws) => ws.map((w) => w.rule);
@@ -133,9 +136,11 @@ test('formatWarning: 行番号・規則・内容・言い換え', () => {
   assert.equal(s, 'L4 [verbose] 冗長な表現「確認を行う」（を行う） → 確認する');
 });
 
-// yomiyasu（https://github.com/nanaism/yomiyasu）の README の「比較例1」から引いた修正前と修正後の文。
-const YOMIYASU_BEFORE = `## A
-ここで**重要なのは、単なるパーツの共通化ではなく、組織の意思決定OSとしてのガバナンス**です。
+// yomiyasu（https://github.com/nanaism/yomiyasu）から移植した検査。期待値は yomiyasu v1.0.5 の
+// scripts/yomiyasu_lint.py で同じ文を検査した結果に合わせている。
+
+// yomiyasu の README の「比較例1」の修正前の文。
+const YOMIYASU_BEFORE = `ここで**重要なのは、単なるパーツの共通化ではなく、組織の意思決定OSとしてのガバナンス**です。
 
 従来の開発では、画面ごとに手触り感を探りながらパーツを作っていました。しかし、片方だけを見て画面を作ると、もう片方のアクセシビリティが**静かに壊れます**。そこでデザインシステムという**強固な土台**を置くことで、開発者の**解像度が一段上がります**。
 
@@ -145,41 +150,96 @@ const YOMIYASU_BEFORE = `## A
 もちろん、これは「デザイナーが不要になる」ことを意味しません。日々の開発に**地味に効いてきます**。ぜひ参考にしてみてください！
 `;
 
-const YOMIYASU_AFTER = `## A
-デザインシステムを導入する目的は、ボタンや入力欄などのUIパーツを一から作成する負担を減らし、画面全体の情報設計に集中することにあります。
+const AI_RULES = new Set(['slop-word', 'metaphor-verb', 'filler', 'negative-parallel', 'emoji', 'redundant-bracket', 'halfwidth-space', 'trailing-colon', 'sentence-end-repeat', 'excess-bold', 'excess-list', 'bold-not-rendered']);
+const aiFindings = (src) => lint(src).filter((w) => AI_RULES.has(w.rule)).map((w) => `${w.line}:${w.rule}`);
 
-導入によってデザイン作業そのものが不要になるわけではありません。しかし、単純なパーツ作成にかかる工数を削減することで、本来注力すべき使い勝手の検証や品質向上に時間を充てられるようになります。
-`;
-
-const AI_RULES = new Set(['slop-word', 'metaphor-verb', 'filler', 'emoji']);
-const aiFindings = (src) => lint(src).filter((w) => AI_RULES.has(w.rule)).map((w) => `${w.rule}:${w.message.match(/「([^」]+)」/)[1]}`);
-
-test('AI の文章に多い表現：yomiyasu の修正前の文で検出し、修正後の文では検出しない', () => {
-  assert.deepEqual(aiFindings(YOMIYASU_BEFORE), [
-    'filler:重要なのは',
-    'slop-word:意思決定OS',
-    'slop-word:手触り',
-    'metaphor-verb:静かに壊れ',
-    'slop-word:解像度が高い',
-    'metaphor-verb:時間を溶かさ',
-    'metaphor-verb:側に倒し',
-    'metaphor-verb:地味に効い',
-    'filler:ぜひ〜してみてください',
+test('yomiyasu：README の修正前の文で、yomiyasu と同じ指摘とスコアを出す', () => {
+  const ws = lint(YOMIYASU_BEFORE).filter((w) => AI_RULES.has(w.rule));
+  assert.deepEqual(ws.map((w) => `${w.line}:${w.rule}`).sort(), [
+    '1:excess-bold', '1:excess-list', '1:filler', '1:negative-parallel', '1:slop-word',
+    '3:metaphor-verb', '3:slop-word', '3:slop-word', '3:slop-word',
+    '6:metaphor-verb', '8:filler', '8:metaphor-verb',
   ]);
-  assert.deepEqual(aiFindings(YOMIYASU_AFTER), []);
+  assert.equal(aiScore(ws), 43);
 });
 
-test('AI の文章に多い表現：技術文書で文字どおりに使う語や記号は検出しない', () => {
+test('yomiyasu：行ごとの規則', () => {
   const cases = [
-    { name: '絵文字', req: '## A\nデプロイした 🚀', want: ['emoji:🚀'] },
-    { name: '異体字セレクタつきの記号', req: '## A\n注意 ⚠️ を読む。', want: ['emoji:⚠️'] },
-    { name: '状態語とキーの記号', req: '## A\n| 項目 | 結果 |\n|---|---|\n| 速度 | ✓ 速い |\n\n⌘ と ✗ と ⚠ を押す。', want: [] },
-    { name: '画面の解像度', req: '## A\n画面の解像度は 1920 × 1080 にする。', want: [] },
-    { name: 'データの破損', req: '## A\n書き込み中に止まるとデータが壊れる。', want: [] },
-    { name: '文中の「重要なのは」', req: '## A\nここで確かめて重要なのは順序だと分かった。', want: [] },
-    { name: 'コードと取り消し線は対象外', req: '## A\n`手触り` と ~~腹落ち~~ を例に挙げる。', want: [] },
-    { name: '見出しは対象外', req: '## 腹落ちする設計\n本文。', want: [] },
-    { name: 'callout も対象', req: '## A\n```callout info 注\nいかがでしたか？\n```', want: ['filler:いかがでしたでしょうか'] },
+    { name: '語', req: '## A\n手触りと腹落ちを確かめる。', want: ['2:slop-word', '2:slop-word'] },
+    { name: '比喩の動詞', req: '## A\n設定を共通側に倒す。', want: ['2:metaphor-verb'] },
+    { name: '「壊れる」と「静かに壊れる」は二重に数えない', req: '## A\nデータが静かに壊れる。', want: ['2:metaphor-verb'] },
+    { name: '前置き', req: '## A\n結論から言うと、速くなった。', want: ['2:filler'] },
+    { name: '締め', req: '## A\nいかがでしたか？', want: ['2:filler'] },
+    { name: 'AではなくB は参考', req: '## A\n速さではなく正しさを選ぶ。', want: ['2:negative-parallel'] },
+    { name: '英単語の前後の半角空白', req: '## A\nこれは Redis を使う。', want: ['2:halfwidth-space'] },
+    { name: '文末のコロン', req: '## A\n手順は次のとおり：', want: ['2:trailing-colon'] },
+    { name: '絵文字（見出しも）', req: '## 公開 🚀\nデプロイした 🎉', want: ['1:emoji', '2:emoji'] },
+    { name: '見出しの補足のかっこ', req: '## 設計（概要）\n本文。', want: ['1:redundant-bracket'] },
+    { name: '題名の見出しも見る', req: '# 題名（詳細）\n## A\n本文。', want: ['1:redundant-bracket'] },
+    { name: '表のセルとナレーションの引用も見る', req: '## A\n| 項目 | 説明 |\n|---|---|\n| 速度 | 手触りがよい |\n\n> 腹落ちした。', want: ['4:slop-word', '6:slop-word'] },
+    { name: '表の状態語の記号は絵文字ではない', req: '## A\n| 項目 | 結果 |\n|---|---|\n| 速度 | ✓ 速い |\n| 量 | ⚠ 多い |', want: [] },
+    { name: 'コードと取り消し線は見ない', req: '## A\n`手触り` と ~~腹落ち~~ を例に挙げる。', want: [] },
   ];
   for (const { name, req, want } of cases) assert.deepEqual(aiFindings(req), want, name);
+});
+
+test('yomiyasu：文末の繰り返しと、太字・箇条書きの頻度', () => {
+  const long = '説明の文を書く。'.repeat(40);
+  const cases = [
+    { name: '同じ文末が 3 文続く', req: '## A\n速いです。安いです。軽いです。', want: ['2:sentence-end-repeat'] },
+    { name: '2 文なら出さない', req: '## A\n速いです。安いです。重い。', want: [] },
+    { name: 'リストの文は数えない', req: '## A\n- 速いです。\n- 安いです。\n- 軽いです。', want: [] },
+    { name: '箇条書きが多い', req: `## A\n${long}\n- 一\n- 二\n- 三`, want: ['1:excess-list'] },
+    { name: '太字が多い', req: `## A\n${long}**一**と**二**と**三**と**四**を書く。`, want: ['1:excess-bold'] },
+    { name: '300 字以下なら頻度は見ない', req: '## A\n短い。\n- 一\n- 二', want: [] },
+  ];
+  for (const { name, req, want } of cases) assert.deepEqual(aiFindings(req), want, name);
+});
+
+test('yomiyasu：太字にならない ** は直し方の案つきで出す', () => {
+  const cases = [
+    { req: '次に**「文書の立場」**を決めます。', wantHow: 'かっこの内側だけを太字にする', wantSuggest: '「**文書の立場**」' },
+    { req: 'これは**必須です。**詳しくは下に書きます。', wantHow: '句読点を太字の外に出す', wantSuggest: '**必須です**。' },
+    { req: '立場は**「勧め」か「決まり」**で決めます。', wantHow: '文字に接する側に半角スペースを入れる', wantSuggest: ' **「勧め」か「決まり」** ' },
+    { req: '次は** 重要**です', wantHow: '太字の内側の空白を取る', wantSuggest: '次は**重要**です' },
+    { req: '次に**「太字は1行目から始まり、\n2行目で閉じる。」**を決めます。', wantHow: 'かっこの内側だけを太字にする', wantSuggest: '「**太字は1行目から始まり、\n2行目で閉じる。**」' },
+  ];
+  for (const { req, wantHow, wantSuggest } of cases) {
+    const got = boldProblems(req);
+    assert.equal(got.length, 1, req);
+    assert.equal(got[0].how, wantHow, req);
+    assert.ok(got[0].suggest.includes(wantSuggest), `${req}: ${got[0].suggest}`);
+  }
+  const [w] = lint('## A\n前置き。\n次は**「立場」**を読む。').filter((x) => x.rule === 'bold-not-rendered');
+  assert.equal(w.line, 3, '太字の開きの行');
+  assert.equal(w.severity, 'error');
+  assert.match(w.message, /「。↵次は\*\*「立場」\*\*を読む。」/);
+});
+
+test('yomiyasu：太字の fixture（yomiyasu の tests/fixtures/bold_regressions.json）の全 50 件', () => {
+  const cases = JSON.parse(readFileSync(new URL('./fixtures/yomiyasu/bold_regressions.json', import.meta.url), 'utf8'));
+  assert.equal(cases.length, 50);
+  for (const { id, text, expected_bold_problems: wantCount, expected_line_numbers: wantLines } of cases) {
+    const got = boldProblems(text);
+    // 件数が null のものはブロックの境界の例。ブロックをまたぐ直し方の案を出さないことだけを確かめる（yomiyasu と同じ）。
+    if (wantCount === null) {
+      assert.equal(got.some((p) => p.suggest), false, id);
+      continue;
+    }
+    assert.equal(got.length, wantCount, id);
+    if (wantCount > 0 && wantLines.length) assert.deepEqual(got.map((p) => p.line), wantLines, id);
+  }
+});
+
+test('yomiyasu：参考（info）の指摘は strict でも生成を止めない。スコアは warn を 5 点、info を 2 点引く', () => {
+  assert.doesNotThrow(() => renderDoc('---\nstyle: strict\n---\n## A\n速さではなく正しさを選ぶ。\n'));
+  assert.throws(() => renderDoc('---\nstyle: strict\n---\n## A\n手触りを確かめる。\n'), /STE 検査で警告が 1 件/);
+  const cases = [
+    { req: [], want: 100 },
+    { req: [{ severity: 'warn' }, { severity: 'error' }, { severity: 'info' }], want: 88 },
+    { req: [{ rule: 'sentence-length' }], want: 100 },
+    { req: Array.from({ length: 30 }, () => ({ severity: 'warn' })), want: 0 },
+  ];
+  for (const { req, want } of cases) assert.equal(aiScore(req), want, JSON.stringify(req));
+  assert.match(formatWarning({ line: 3, rule: 'negative-parallel', message: 'm', severity: 'info' }), /^L3 \[negative-parallel\]（参考） m$/);
 });

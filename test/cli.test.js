@@ -108,6 +108,19 @@ test('cli lint: 検査だけ。strict で警告があれば 1、off なら飛ば
   assert.match((await run(['lint', '-', '--style', 'off'], { stdin: bad })).out, /STE 検査はオフです/);
 });
 
+test('cli lint: AI っぽさのスコアを出す。参考の指摘だけなら strict でも 0', async () => {
+  const cases = [
+    { name: 'AI の文章に多い語', stdin: '## A\n手触りと腹落ちを確かめる。', wantCode: 1, wantScore: 90 },
+    { name: '参考の指摘だけ', stdin: '## A\n速さではなく正しさを選ぶ。', wantCode: 0, wantScore: 98 },
+  ];
+  for (const { name, stdin, wantCode, wantScore } of cases) {
+    const r = await run(['lint', '-', '--style', 'strict'], { stdin });
+    assert.equal(r.code, wantCode, name);
+    assert.match(r.out, new RegExp(`AI っぽさのスコア ${wantScore}/100`), name);
+  }
+  assert.doesNotMatch((await run(['lint', '-', '--style', 'off'], { stdin: '## A\n手触り。' })).out, /スコア/);
+});
+
 test('cli list / help', async () => {
   assert.match((await run(['list'])).out, /flow\s+フロー図/);
   const h = await run(['help', 'sequence']);

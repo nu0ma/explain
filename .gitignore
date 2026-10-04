@@ -4,3 +4,6 @@ node_modules/
 coverage/
 .playwright-mcp/
 dist/
+# apm install で入る依存と、展開されるスキル（apm.yml と apm.lock.yaml から復元する）
+apm_modules/
+.claude/skills/yomiyasu/

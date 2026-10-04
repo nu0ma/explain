@@ -6,7 +6,7 @@ A CLI that turns a Markdown script into a self-contained, single-file explainer 
 
 - Turns a PR's before and after, the flow of an incident, or a system's architecture into a one-page diagram.
 - Lays out diagrams (flow / sequence / tree, etc.) automatically: you only write the relationships.
-- Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and flags patterns common in AI-generated Japanese (buzzwords, metaphorical verbs, filler openers and closers, emoji).
+- Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
 - With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript (such as Pageshelf safe mode).
 
 ## Usage
@@ -32,16 +32,16 @@ explain cache [clear]                               # show (or clear) the narrat
 
 ## Rewriting AI-style Japanese
 
-`explain lint` only points out AI-style phrasing; it does not rewrite your script. To rewrite a script drafted by an AI agent before running `explain render`, use the [yomiyasu](https://github.com/nanaism/yomiyasu) Agent Skill:
+`explain lint` only points out AI-style phrasing; it does not rewrite your script. To rewrite a script drafted by an AI agent before running `explain render`, use the [yomiyasu](https://github.com/nanaism/yomiyasu) Agent Skill. It is declared in `apm.yml` (pinned to v1.0.5), so [APM](https://github.com/microsoft/apm) deploys it to `.claude/skills/`:
 
 ```sh
-npx skills add nanaism/yomiyasu
+apm install --frozen
 ```
 
-Then ask your agent to apply yomiyasu to the script, and run `explain lint` again to confirm the warnings are gone.
+Then ask your agent to apply yomiyasu to the script, and run `explain lint` again to confirm the warnings are gone. Findings marked `（参考）` are yomiyasu's `info` level and do not block `style: strict`.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
-The AI-style word and pattern lists in `src/lint/wordlist.yomiyasu.js` are ported from [yomiyasu](https://github.com/nanaism/yomiyasu) v1.0.5 (MIT License, Copyright (c) 2026 nanaism); the full notice is kept in that file.
+The checks in `src/lint/yomiyasu.js` are ported from `scripts/yomiyasu_lint.py` in [yomiyasu](https://github.com/nanaism/yomiyasu) v1.0.5, and `test/fixtures/yomiyasu/` contains its bold-rendering test fixtures (MIT License, Copyright (c) 2026 nanaism). The full notice is kept in `src/lint/yomiyasu.js` and `test/fixtures/yomiyasu/LICENSE`.
