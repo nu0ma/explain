@@ -2,6 +2,8 @@
 
 A Claude Code plugin that lets the agent explain things as a self-contained, single-file explainer HTML page or a 3Blue1Brown-style explainer video. Ask "図にして" or "動画で説明して", and the agent writes a Markdown script, renders it with the bundled CLI, and fixes the reported warnings. The CLI also works on its own.
 
+It is fast enough to sit inside the agent's loop: a page renders in under 0.1 s, and an 84-second 1080p narrated video exports to MP4 in about 17 s. It needs only Node: no runtime dependencies, no API keys, and no external TTS service.
+
 It is a personal tool rebuilt for one engineer who works in Japanese, so both the generated output and the CLI messages are Japanese only.
 
 ## Install as a Claude Code plugin
@@ -65,6 +67,25 @@ The flow grows one step per narration line, the camera follows each server named
 - Lays out diagrams (flow / sequence / tree, etc.) automatically: you only write the relationships.
 - Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
 - With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript.
+
+## Speed
+
+Measured on an Apple M3 Max with Node 24.21, Chrome 154, ffmpeg 8.0, and macOS `say`. Each number is the median of 3 runs on the demo scripts.
+
+| Command | Time |
+|---|---|
+| `explain render` (page, Transactional Outbox) | 0.08 s |
+| `explain render --png` (page, screenshot, and layout check) | 0.86 s |
+| `explain video` (84 s DNS video, narration cached) | 0.74 s |
+| `explain video` (84 s DNS video, narration synthesized) | 6.6 s |
+| `explain video --mp4` (84 s, 1920×1080, 30 fps, narration cached) | 17 s |
+
+Why it is fast:
+
+- Parsing, layout, and the prose check run in one Node process with no runtime dependencies. The Markdown renderer and the flow layout are written in this repository, and the CLI ships as one file of about 177 KB.
+- MP4 export screenshots only the frames that change. The player reports when each scene, step, camera move, and caption changes, and every other frame reuses the previous image. The frames are spread over several headless Chrome processes, because one Chrome takes about 40 ms per screenshot however many tabs it has.
+- Narration is cached per sentence and voice, so re-rendering a video only synthesizes the lines that changed.
+- The skill has the agent fix a video script with `explain lint` (under 0.1 s) before it renders the video once.
 
 ## Use the CLI directly
 
