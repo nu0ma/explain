@@ -24,13 +24,13 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@dagrejs/dagre": "^3.1.1",
-    "marked": "^18.0.14"
+    "@dagrejs/dagre": "3.1.1",
+    "marked": "18.0.14"
   },
   "devDependencies": {
-    "@types/node": "^24.19.1",
-    "esbuild": "^0.28.2",
-    "oxlint": "^1.86.0",
-    "typescript": "^7.0.2"
+    "@types/node": "24.19.1",
+    "esbuild": "0.28.2",
+    "oxlint": "1.86.0",
+    "typescript": "7.0.2"
   }
 }
