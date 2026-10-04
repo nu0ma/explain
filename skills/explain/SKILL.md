@@ -76,7 +76,7 @@ If the command is denied, tell the user which permission to allow instead of wri
 
 1. Run `explain help format` (or `explain help video`) once per session.
 2. Render with the script on stdin: `explain render - --png --report json <<'EOF' ... EOF`
-   For a video, check the script with `explain lint -` first and fix the warnings there: each
+   For a video, check the script with `explain lint - --video` first and fix the errors and warnings there: each
    `explain video` run synthesizes the narration again, and `--mp4` exports for a minute or more.
    Then run `explain video - --no-open` once. Add `--mp4` only when the user asks for a file.
    `--png` needs Chrome; if the report says it cannot make the image, render again without `--png`.

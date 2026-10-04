@@ -57,15 +57,8 @@ export async function renderVideo(
   source: string,
   { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null }: RenderVideoOptions = {},
 ): Promise<RenderedVideo> {
-  const video = parseVideo(source, { defaults });
+  const { video, warnings, screens, stats } = prepareVideo(source, { defaults, overrides });
   const { meta } = video;
-  // Command-line arguments take precedence over the script and the config.
-  applyOverrides(meta, overrides, { ...CHOICES, theme: VIDEO_THEMES });
-
-  if (meta.static === 'true') throw new ParseError('動画の再生には JavaScript が必要なため、static: true は使えません', 0);
-
-  // Each narration line is one beat, so any number of consecutive lines is not a "paragraph too long".
-  const warnings = meta.style === 'off' ? [] : lintDoc(video.doc).filter((w) => w.rule !== 'paragraph-length');
   if (meta.style === 'strict' && blockingWarnings(warnings).length) throw new LintError(blockingWarnings(warnings));
 
   const beats = allBeats(video);
@@ -83,8 +76,6 @@ export async function renderVideo(
   const wav = clips ? mixTrack(clips, flat.map((b) => b.start), timeline.duration) : null;
   const audio = wav && ((encodeAudio && await encodeAudio(wav)) || { mime: 'audio/wav', data: wav });
 
-  const stats = { panels: video.scenes.length, components: {} };
-  const ctx: RenderContext = { seq: 0, stats };
   const data: PlayerData = {
     duration: timeline.duration,
     fps: 30,
@@ -97,12 +88,34 @@ export async function renderVideo(
   };
   const total = video.scenes.length;
   const scenesHtml = [
-    titleScene(meta, renderBlocks(video.intro, ctx), { scenes: total, duration: timeline.duration }),
-    ...video.scenes.map((s, i) => scene(s, i, total, renderBlocks(s.blocks, ctx))),
+    titleScene(meta, screens.intro, { scenes: total, duration: timeline.duration }),
+    ...video.scenes.map((s, i) => scene(s, i, total, screens.scenes[i])),
   ].join('\n');
 
   const html = shell({ meta, scenesHtml, data, audio, source });
   return { html, wav, warnings, stats, meta, duration: timeline.duration, beats: beats.length };
+}
+
+// Everything explain video does before it synthesizes the narration: parse, check, lint, and draw the screens.
+// explain lint --video runs the same steps, so it rejects what explain video would reject.
+export function prepareVideo(
+  source: string,
+  { defaults = {}, overrides = {} }: Pick<RenderVideoOptions, 'defaults' | 'overrides'> = {},
+): { video: Video; warnings: Warning[]; screens: { intro: string; scenes: string[] }; stats: RenderedVideo['stats'] } {
+  const video = parseVideo(source, { defaults });
+  const { meta } = video;
+  // Command-line arguments take precedence over the script and the config.
+  applyOverrides(meta, overrides, { ...CHOICES, theme: VIDEO_THEMES });
+
+  if (meta.static === 'true') throw new ParseError('動画の再生には JavaScript が必要なため、static: true は使えません', 0);
+
+  // Each narration line is one beat, so any number of consecutive lines is not a "paragraph too long".
+  const warnings = meta.style === 'off' ? [] : lintDoc(video.doc).filter((w) => w.rule !== 'paragraph-length');
+
+  const stats = { panels: video.scenes.length, components: {} };
+  const ctx: RenderContext = { seq: 0, stats };
+  const screens = { intro: renderBlocks(video.intro, ctx), scenes: video.scenes.map((s) => renderBlocks(s.blocks, ctx)) };
+  return { video, warnings, screens, stats };
 }
 
 const beatsOf = (video: Video, i: number) => (i === 0 ? video.introBeats : video.scenes[i - 1].beats);

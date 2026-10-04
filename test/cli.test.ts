@@ -111,6 +111,37 @@ test('cli lint: 検査だけ。strict で警告があれば 1、off なら飛ば
   assert.match((await run(['lint', '-', '--style', 'off'], { stdin: bad })).out, /STE 検査はオフです/);
 });
 
+test('cli lint --video: 動画の原稿を explain video と同じ規則で検査する', async () => {
+  const scene = '## 一つ目\n```flow\nA -> B\n```\n';
+  const cases = [
+    { name: '動画のテーマ 3b1b', stdin: `---\ntheme: 3b1b\n---\n${scene}> 文を書く。\n`, wantCode: 0, want: /STE ✓ 警告 0 件/ },
+    { name: '30 秒を超える間', stdin: `${scene}> (間 99秒)\n> 文を書く。\n`, wantCode: 1, want: /0 より長く 30 秒以下/ },
+    { name: 'ナレーションのない場面', stdin: scene, wantCode: 1, want: /ナレーションがありません/ },
+    { name: 'static: true', stdin: `---\nstatic: true\n---\n${scene}> 文を書く。\n`, wantCode: 1, want: /static: true は使えません/ },
+    { name: '部品の書き間違い', stdin: '## 一つ目\n```flow\nA ->\n```\n> 文を書く。\n', wantCode: 1, want: /\[flow\] flow に空のノードがあります/ },
+  ];
+  for (const { name, stdin, wantCode, want } of cases) {
+    const lint = await run(['lint', '-', '--video'], { stdin });
+    assert.equal(lint.code, wantCode, name);
+    assert.match(lint.out + lint.err, want, name);
+    assert.equal((await run(['video', '-', '--voice', 'off'], { stdin })).code, wantCode, `${name}：explain video と同じ終了コード`);
+  }
+});
+
+test('cli lint --video: ナレーションが何行続いても長い段落とみなさない。strict では警告があれば 1', async () => {
+  const lines = Array.from({ length: 8 }, (_, i) => `> ${i + 1} 番目の手順を説明する。`).join('\n');
+  const cases = [
+    { name: '続くナレーション', req: ['lint', '-', '--video'], stdin: `## 場面\n${lines}\n`, wantCode: 0, want: /STE ✓ 警告 0 件/ },
+    { name: 'strict', req: ['lint', '-', '--video', '--style', 'strict'], stdin: '## 場面\n> 設定の確認を行う。\n', wantCode: 1, want: /STE 警告 1 件/ },
+    { name: '不正な style', req: ['lint', '-', '--video', '--style', 'x'], stdin: '## 場面\n> 文を書く。\n', wantCode: 2, want: /style の値 "x" は使えません/ },
+  ];
+  for (const { name, req, stdin, wantCode, want } of cases) {
+    const r = await run(req, { stdin });
+    assert.equal(r.code, wantCode, name);
+    assert.match(r.out + r.err, want, name);
+  }
+});
+
 test('cli lint: AI っぽさのスコアを出す。参考の指摘だけなら strict でも 0', async () => {
   const cases = [
     { name: 'AI の文章に多い語', stdin: '## A\n手触りと腹落ちを確かめる。', wantCode: 1, wantScore: 90 },

@@ -12,7 +12,7 @@ import { lintDoc, formatWarning, blockingWarnings } from './lint/ste.ts';
 import { aiScore } from './lint/yomiyasu.ts';
 import { COMPONENTS } from './components/index.ts';
 import { THEMES } from './themes/index.ts';
-import { renderVideo } from './video/render.ts';
+import { renderVideo, prepareVideo } from './video/render.ts';
 import { serveWatch } from './watch.ts';
 import { fileStamp, clock } from './time.ts';
 import { pickProvider, compressAudio, cacheStats, CACHE_MAX_BYTES, TtsError, VOICES } from './video/tts.ts';
@@ -57,6 +57,7 @@ export type CliOptions = {
   mp4?: boolean;
   png?: boolean;
   report?: string;
+  video?: boolean;
   help?: boolean;
   version?: boolean;
 };
@@ -73,7 +74,8 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
   explain video  <file|->  [-o 出力先] [--voice say|off] [--mp4] [--no-open]
                            [--theme blueprint|shadcn|3b1b] [--mode auto|light|dark]
                                                      3b1b 風の解説動画の再生ページを作る（--mp4 で動画ファイルも保存）
-  explain lint   <file|->  [--style off|80|strict]   STE 検査だけする
+  explain lint   <file|->  [--style off|80|strict] [--video]
+                                                     STE 検査だけする。--video は動画の原稿を explain video と同じ規則で検査する
   explain config [set <キー> <値> | get <キー> | reset [キー]]
                                                      設定を表示・変更する
   explain cache [clear]                              音声のキャッシュの場所と大きさを表示する。clear で消す
@@ -160,6 +162,7 @@ Client -> Server: ACK
 - となりあう場面に同じ名前のノードや参加者があると、前の位置から次の位置へなめらかに動く（場面をまたぐ変形）。
 - 部品で表せない図は html / svg ブロックで書く。要素に data-step="N" を付けると手順になり、data-key="名前" を付けると [名前] のカメラと場面をまたぐ変形の対象になる（explain help format）。
 - 音声：--voice say（既定。macOSのsayで読み上げる。日本語の声はKyoko、Eddy、Flo、Reedの順に探す）| off（字幕だけ）。
+- explain lint <file|-> --video は、音声を合成せずに explain video と同じ規則で原稿を検査する。
 - 出力先は ~/.explain/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg が必要）。
 - ffmpeg があれば、再生ページに埋め込む音声を AAC に圧縮する（なければ WAV のまま）。
 - 動画は再生に JavaScript が要るため、--static は使えない。`;
@@ -190,6 +193,7 @@ export async function main(argv: string[], io: MainIO = {}): Promise<number> {
         mp4: { type: 'boolean' },
         png: { type: 'boolean' },
         report: { type: 'string' },
+        video: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -451,19 +455,27 @@ async function cmdVideo(
   return 0;
 }
 
+// --video checks a video script with the same steps explain video takes before it synthesizes the narration.
 function cmdLint(src: string, opts: CliOptions, { print, fail }: Pick<Context, 'print' | 'fail'>): number {
-  let doc: ReturnType<typeof parseDoc>;
+  if (opts.style !== undefined && !(CHOICES.style as readonly string[]).includes(opts.style)) {
+    fail(`✗ style の値 "${opts.style}" は使えません。選択肢：${CHOICES.style.join(' | ')}`);
+    return 2;
+  }
+  let style: string;
+  let warnings: ReturnType<typeof lintDoc>;
   try {
-    doc = parseDoc(src);
+    if (opts.video) {
+      const { video, warnings: found } = prepareVideo(src, { overrides: { style: opts.style } });
+      style = video.meta.style;
+      warnings = found;
+    } else {
+      const doc = parseDoc(src);
+      style = opts.style ?? doc.meta.style;
+      warnings = style === 'off' ? [] : lintDoc(doc);
+    }
   } catch (e) {
     return reportError(e, fail);
   }
-  const style = opts.style ?? doc.meta.style;
-  if (!(CHOICES.style as readonly string[]).includes(style)) {
-    fail(`✗ style の値 "${style}" は使えません。選択肢：${CHOICES.style.join(' | ')}`);
-    return 2;
-  }
-  const warnings = style === 'off' ? [] : lintDoc(doc);
   printWarnings(warnings, print, style);
   if (style !== 'off') print(`  AI っぽさのスコア ${aiScore(warnings)}/100（yomiyasu の基準。AI の文章に多い書き方 1 件につき 5 点、参考の件は 2 点を引く）`);
   return style === 'strict' && blockingWarnings(warnings).length ? 1 : 0;
