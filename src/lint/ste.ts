@@ -112,13 +112,22 @@ function collectSentences(raw: string, line: number, ctx: LintContext): void {
 }
 
 function clean(text: string): string {
-  return text
+  return stripTags(text
     .replace(/~~[^~]*~~/g, '')
     .replace(/`[^`]*`/g, '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1'))
     .replace(/[*_]{1,3}/g, '');
+}
+
+// Removes tags until none are left, so a nested fragment like <scr<x>ipt> cannot leave a tag behind.
+function stripTags(text: string): string {
+  let prev;
+  do {
+    prev = text;
+    text = text.replace(/<[^>]+>/g, '');
+  } while (text !== prev);
+  return text;
 }
 
 function lintMarkdown(text: string, startLine: number, out: LintWarning[], ctx: LintContext): void {

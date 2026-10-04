@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/1b36b279-ffea-496c-b2ee-9e6c4d920ac0
 
 3. The agent writes a Markdown script, renders it with the bundled CLI, fixes what the CLI reports, and gives you the path of the page.
 
-Needs only Node 24.21+. `--png` and `--mp4` also use Chrome, MP4 export uses ffmpeg, and narration uses macOS `say`.
+Runs on macOS and Linux; Windows is not supported. Needs only Node 24.21+. `--png` and `--mp4` also use Chrome, MP4 export uses ffmpeg, and narration uses macOS `say`.
 
 ## Why explain
 

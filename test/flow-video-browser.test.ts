@@ -146,3 +146,29 @@ test('e2e 動画：幅の広い flow は画面に収まり、表の行の強調�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('e2e caption: [name] は強調語になり、< や > は文字のまま出る', {
+  skip: !(process.env.EXPLAIN_E2E === '1' && chrome), timeout: 60000,
+}, async () => {
+  assert.ok(chrome);
+  const dir = mkdtempSync(join(tmpdir(), 'explain-caption-'));
+  let browser: Awaited<ReturnType<typeof launchChrome>> | undefined;
+  try {
+    browser = await launchChrome(chrome, join(dir, 'profile'));
+    const source = '## A\n```flow\nServer -> Client\n```\n> [Server] が <b>ACK</b> を返す。\n';
+    const { html } = await renderVideo(source);
+    const file = join(dir, 'video.html');
+    writeFileSync(file, html);
+    const page = await openPage(browser.cdp, file);
+    await page.evaluate('window.__amv.exportMode()');
+    const result = await page.evaluate(`(() => {
+      const data = JSON.parse(document.querySelector('#amv-data').textContent);
+      window.render(data.segments[1].beats[0].start + 0.1);
+      return document.querySelector('.amv-caption span').innerHTML;
+    })()`);
+    assert.equal(result, '<b>Server</b> が &lt;b&gt;ACK&lt;/b&gt; を返す。');
+  } finally {
+    await browser?.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

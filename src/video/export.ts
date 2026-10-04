@@ -125,11 +125,6 @@ const CHROME_PATHS: { [P in NodeJS.Platform]?: string[] } & { linux: string[] } 
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
   ],
-  win32: [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  ],
   linux: ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'microsoft-edge'],
 };
 
@@ -137,7 +132,7 @@ export function findChrome(env: NodeJS.ProcessEnv = process.env, platform: NodeJ
   const custom = env.EXPLAIN_CHROME || env.CHROME_PATH;
   if (custom) return custom;
   const list = CHROME_PATHS[platform] ?? CHROME_PATHS.linux;
-  return list.find((p) => (p.includes('/') || p.includes('\\') ? existsSync(p) : hasCommand(p))) ?? null;
+  return list.find((p) => (p.includes('/') ? existsSync(p) : hasCommand(p))) ?? null;
 }
 
 // render(t) is deterministic, so the same page is opened in `concurrency` tabs and frames are split between them.

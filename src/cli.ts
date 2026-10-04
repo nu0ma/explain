@@ -614,11 +614,9 @@ function writeOutput(
 }
 
 function openFile(file: string): void {
-  const [cmd, args]: [string, string[]] = process.platform === 'darwin' ? ['open', [file]]
-    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', file]]
-      : ['xdg-open', [file]];
+  const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
-    spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+    spawn(cmd, [file], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   } catch {
     // Failing to open a browser does not affect the output; the path is already printed.
   }

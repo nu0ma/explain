@@ -198,6 +198,17 @@
   const hlTargets = new Set(camEvents.map((e) => e.hl).filter(Boolean));
 
   // ── 5. Deterministic rendering: the same time always draws the same frame ──
+  // Captions: [name] becomes emphasized text. Built as nodes so caption text is never parsed as HTML.
+  function setCaption(text) {
+    caption.replaceChildren(...text.split(/(\[[^\]\n]+\])/).filter(Boolean).map((part) => {
+      const m = part.match(/^\[([^\]]+)\]$/);
+      if (!m) return part;
+      const b = document.createElement('b');
+      b.textContent = m[1];
+      return b;
+    }));
+  }
+
   function render(t) {
     t = clamp(t, 0, D.duration);
     const cur = segs.findLastIndex((s) => t >= s.start);
@@ -270,10 +281,10 @@
     // caption
     const beats = cur >= 0 ? segs[cur].beats : [];
     const b = beats.find((x) => t >= x.start && t < x.end + 0.3);
-    const html = b ? b.html : '';
-    if (caption.dataset.html !== html) {
-      caption.innerHTML = html;
-      caption.dataset.html = html;
+    const text = b ? b.caption : '';
+    if (caption.dataset.text !== text) {
+      setCaption(text);
+      caption.dataset.text = text;
     }
     caption.style.opacity = b ? clamp((t - b.start) / 0.2) : 0;
     updateUi(t);

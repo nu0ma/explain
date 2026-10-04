@@ -126,7 +126,7 @@ export function pickMacVoice(out: string): string | undefined {
 }
 
 export function hasCommand(cmd: string): boolean {
-  return spawnSync(process.platform === 'win32' ? 'where' : 'which', [cmd], { stdio: 'ignore' }).status === 0;
+  return spawnSync('which', [cmd], { stdio: 'ignore' }).status === 0;
 }
 
 function run(cmd: string, args: string[]): Promise<void> {
