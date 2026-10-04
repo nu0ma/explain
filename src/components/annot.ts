@@ -7,7 +7,8 @@ type AnnotGroup = { title: string; meta: string; lines: string[]; captions: stri
 // Occupied [start, end] ranges per row.
 type Rows = Array<Array<[number, number]>>;
 
-const SEG = /\[([^\]]+)\]\{(!?)([^}]*)\}/g;
+// The annotated part cannot contain "[", so a run of unclosed brackets is scanned once instead of once per bracket.
+const SEG = /\[([^[\]]+)\]\{(!?)([^}]*)\}/g;
 const TEXT_SIZE = 14;
 const NOTE_SIZE = 11;
 const NOTE_GAP = 10;
@@ -58,7 +59,8 @@ function groupHtml(g: AnnotGroup): string {
 
 function sentenceHtml(sentence: string, line: number): string {
   const stripped = sentence.replace(SEG, '');
-  if (/\[[^\]]*\]\{|\]\{[^}]*$/.test(stripped)) {
+  const lastOpen = stripped.lastIndexOf(']{');
+  if (/\[[^[\]]*\]\{/.test(stripped) || (lastOpen !== -1 && !stripped.includes('}', lastOpen + 2))) {
     throw new ComponentError(`annot の注釈が閉じていません。[部分]{注釈} の形で書いてください："${sentence}"`, line);
   }
   const rows: Rows = [];

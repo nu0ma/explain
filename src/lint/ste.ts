@@ -31,8 +31,10 @@ const NO_CHAIN_MIN = 3; // warn on 3 or more 「の」 (A の B の C の D)
 const PUNCT = /[，。！？；：、（）「」『』“”‘’《》【】・…〜\u3000]/;
 const WORD = /[A-Za-z0-9_][\w'’./-]*/g;
 // One element of a noun phrase: a run of characters without whitespace, punctuation, brackets or common particles.
-const ELEMENT = '[^\\s、。，．！？「」『』（）()\\[\\]・:：,.をはがにでへもやとの]+';
-const NO_CHAIN = new RegExp(`(?:${ELEMENT}の){${NO_CHAIN_MIN},}${ELEMENT}`, 'g');
+const ELEMENT_CHAR = '[^\\s、。，．！？「」『』（）()\\[\\]・:：,.をはがにでへもやとの]';
+const ELEMENT = `${ELEMENT_CHAR}+`;
+// The lookbehind starts a match only at the first character of an element. Without it, a long run without 「の」 was retried from every position.
+const NO_CHAIN = new RegExp(`(?<!${ELEMENT_CHAR})(?:${ELEMENT}の){${NO_CHAIN_MIN},}${ELEMENT}`, 'g');
 const NOUN_BEFORE = /([一-鿿゠-ヿ々A-Za-z0-9]+)$/;
 const GUESS = /推測[：:]/;
 const EMPHASIS_RE = JA_EMPHASIS.map((e) => ({

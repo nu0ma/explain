@@ -145,7 +145,8 @@ export const FILLERS: readonly Pattern[] = Object.freeze([
   { re: /〜に他なりません/, label: '過剰な自己ラベリング「〜に他なりません」' },
 ]);
 
-const NEGATIVE_PARALLEL = /([^。、]+)ではなく、?([^。、]+)/;
+// Only tested for a match, so one character on each side is enough. Capturing whole runs made long lines quadratic.
+const NEGATIVE_PARALLEL = /[^。、]ではなく、?[^。、]/;
 const REDUNDANT_BRACKET = /（(素の出力|いわゆる|概要|詳細|感謝と設計への反映)）/;
 const HALFWIDTH_SPACE = /([ぁ-んァ-ヶ一-龥])\s+([a-zA-Z0-9_-]{2,})\s+([ぁ-ん])/u;
 const SENTENCE_ENDS = ['です', 'ます', 'でした', 'ました', 'である', 'だ', 'だろう'];
@@ -268,29 +269,51 @@ const at = (s: string, p: number): string => (p >= 0 && p < s.length ? s[p] : ''
 
 type Span = [start: number, end: number];
 
+// A backtick run opens a code span that the next run of the same length closes.
 function codeSpans(text: string): Span[] {
   const runs = [...text.matchAll(/`+/g)].map((m): Span => [m.index, m.index + m[0].length]);
+  // nextSame[k]: the index of the next run with the same length as run k. Built from the right so the pairing stays linear.
+  const nextSame: (number | undefined)[] = [];
+  const lastOfLength = new Map<number, number>();
+  for (let k = runs.length - 1; k >= 0; k--) {
+    const len = runs[k][1] - runs[k][0];
+    nextSame[k] = lastOfLength.get(len);
+    lastOfLength.set(len, k);
+  }
   const spans: Span[] = [];
   for (let k = 0; k < runs.length; k++) {
-    const [s, e] = runs[k];
-    for (let m = k + 1; m < runs.length; m++) {
-      if (runs[m][1] - runs[m][0] === e - s) {
-        spans.push([s, runs[m][1]]);
-        k = m;
-        break;
-      }
-    }
+    const m = nextSame[k];
+    if (m === undefined) continue;
+    spans.push([runs[k][0], runs[m][1]]);
+    k = m;
   }
   return spans;
+}
+
+// Whether a sorted array has a value strictly between lo and hi.
+function hasBetween(sorted: readonly number[], lo: number, hi: number): boolean {
+  let a = 0;
+  let b = sorted.length;
+  while (a < b) {
+    const mid = (a + b) >> 1;
+    if (sorted[mid] <= lo) a = mid + 1;
+    else b = mid;
+  }
+  return a < sorted.length && sorted[a] < hi;
 }
 
 export function boldPairs(text: string): Span[] {
   const code = codeSpans(text);
   const pos: number[] = [];
+  // Both the code spans and the ** positions are in text order, so one pointer walks the spans.
+  let c = 0;
   for (const m of text.matchAll(/(?<!\*)\*\*(?!\*)/g)) {
     const p = m.index;
-    if (code.some(([a, b]) => a <= p && p < b)) continue;
-    const bs = text.slice(0, p).match(/\\*$/)?.[0].length ?? 0;
+    while (c < code.length && code[c][1] <= p) c++;
+    if (c < code.length && code[c][0] <= p) continue;
+    // An odd number of backslashes right before ** escapes it.
+    let bs = 0;
+    while (text[p - 1 - bs] === '\\') bs++;
     if (bs % 2 === 1) continue;
     pos.push(p);
   }
@@ -314,11 +337,13 @@ export function boldPairs(text: string): Span[] {
   }
   // Pass 2: pair candidates that failed to open/close only because of inner whitespace.
   const unpaired = pos.filter((p) => !used.has(p));
+  // Pairs added in this pass end at or before p1, so only the pass 1 ends can fall between p1 and p2.
+  const ends = [...used].sort((a, b) => a - b);
   let idx = 0;
   while (idx < unpaired.length - 1) {
     const p1 = unpaired[idx];
     const p2 = unpaired[idx + 1];
-    if (pairs.some(([a, b]) => (p1 < a && a < p2) || (p1 < b && b < p2))) {
+    if (hasBetween(ends, p1, p2)) {
       idx++;
       continue;
     }
@@ -345,6 +370,8 @@ function closeOf(s: string): number {
   }
   return -1;
 }
+
+const MAX_BOLD_FIXES = 20;
 
 function boldFix(text: string, i: number, j: number, k: number): { middle: string | null; how: string } {
   const inner = text.slice(i + 2, j);
@@ -485,11 +512,14 @@ export function boldProblems(
     const offsets = [0];
     for (const [, l] of block.slice(0, -1)) offsets.push((offsets.at(-1) ?? 0) + l.length + 1);
     const lineOf = (idx: number): number => block[offsets.findLastIndex((o) => o <= idx)][0];
+    let fixes = 0;
     boldPairs(blockText).forEach(([i, j], k) => {
       if (pairOk(blockText, i, j)) return;
-      const { middle, how } = boldFix(blockText, i, j, k);
-      const pre = Array.from(blockText.slice(0, i)).slice(-4).join('');
-      const post = Array.from(blockText.slice(j + 2)).slice(0, 4).join('');
+      // Each suggestion re-pairs the whole block, so only the first few broken pairs get one.
+      const { middle, how } = fixes++ < MAX_BOLD_FIXES ? boldFix(blockText, i, j, k) : { middle: null, how: '手で直す' };
+      // 4 characters of context. 8 UTF-16 units always hold 4 characters, so the whole text is not copied per problem.
+      const pre = Array.from(blockText.slice(Math.max(0, i - 8), i)).slice(-4).join('');
+      const post = Array.from(blockText.slice(j + 2, j + 10)).slice(0, 4).join('');
       out.push({
         line: lineOf(i) + startLine - 1,
         found: pre + short(blockText.slice(i, j + 2)) + post,

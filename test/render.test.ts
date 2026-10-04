@@ -196,3 +196,15 @@ test('sheet: 自動で広げた結果が出力に反映される', () => {
   const { html } = renderDoc('---\ncols: 2\n---\n## A {span=2}\nx\n## B\ny\n## C {span=2}\nz');
   assert.match(html, /id="panel-B" style="grid-column: span 2"/);
 });
+
+test('render: 閉じていない表のセルに長い空白があっても、すぐに終わる', () => {
+  const start = performance.now();
+  renderDoc(`## A\n<table><tr><td>ok${' \t'.repeat(1500)}`, { style: 'off' });
+  assert.ok(performance.now() - start < 500, `${Math.round(performance.now() - start)}ms`);
+});
+
+test('render: 表のセルの状態語は、後ろの空白を除いてバッジにする', () => {
+  const { html } = renderDoc('## A\n| a |\n|---|\n| ok  承認済み  |\n| okay |', { style: 'off' });
+  assert.match(html, /am-status-icon" aria-hidden="true">✓<\/span>承認済み<\/span><\/td>/);
+  assert.match(html, /<td>okay<\/td>/);
+});

@@ -23,13 +23,14 @@ export function statusHtml(word: string, label = ''): string | null {
   return `<span class="am-status am-status--${kind.cls}"><span class="am-status-icon" aria-hidden="true">${kind.icon}</span>${text}</span>`;
 }
 
-const CELL_STATUS = /<td([^>]*)>\s*(ok|no|warn|✓|✔|✗|✘|⚠)(?:\s+([^<]*?))?\s*<\/td>/g;
+// The status word must be followed by whitespace or the end of the cell. The label is trimmed afterwards: one [^<]* keeps matching linear.
+const CELL_STATUS = /<td([^>]*)>\s*(ok|no|warn|✓|✔|✗|✘|⚠)(?=[\s<])([^<]*)<\/td>/g;
 
 function decorate(html: string): string {
   return html
     .replace(/<table>/g, '<div class="am-table-wrap"><table>')
     .replace(/<\/table>/g, '</table></div>')
-    .replace(CELL_STATUS, (_, attrs: string, word: string, label = '') => `<td${attrs}>${statusHtml(word, label)}</td>`);
+    .replace(CELL_STATUS, (_, attrs: string, word: string, label: string) => `<td${attrs}>${statusHtml(word, label)}</td>`);
 }
 
 export function md(text: unknown): string {

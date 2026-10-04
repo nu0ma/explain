@@ -101,3 +101,13 @@ test('annot: 注釈の文字がない {!} だけの文は折り返してよい',
   const html = render('annot', 'It is [imperative]{!} that you [ensure]{!} it.');
   assert.match(html, /am-annot-line am-annot-line--wrap" style="--rows: 0"/);
 });
+
+test('annot: 閉じていない括弧が長く続いても、すぐに終わる', () => {
+  for (const line of ['[['.repeat(8000), ']{'.repeat(8000)]) {
+    const start = performance.now();
+    try { render('annot', line); } catch { /* an unclosed note is an error */ }
+    assert.ok(performance.now() - start < 500, `${line.slice(0, 4)}: ${Math.round(performance.now() - start)}ms`);
+  }
+  throwsAt(() => render('annot', 'a [b]{c'), 1);
+  throwsAt(() => render('annot', 'a [b]{c} [d'.concat(']{e')), 1);
+});

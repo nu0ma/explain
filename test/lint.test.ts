@@ -245,3 +245,18 @@ test('yomiyasu：参考（info）の指摘は strict でも生成を止めない
   for (const { req, want } of cases) assert.equal(aiScore(req), want, JSON.stringify(req));
   assert.match(formatWarning({ line: 3, rule: 'negative-parallel', message: 'm', severity: 'info' }), /^L3 \[negative-parallel\]（参考） m$/);
 });
+
+test('「AではなくB」の検出は、長い 1 行でもすぐに終わる', () => {
+  const start = performance.now();
+  lintDoc(parseDoc(`## A\n${'a あ'.repeat(16000)}`));
+  assert.ok(performance.now() - start < 1000, `${Math.round(performance.now() - start)}ms`);
+});
+
+test('太字の検査は、インラインコードと崩れた太字が多い 1 行でもすぐに終わる', () => {
+  const text = '`a` **'.repeat(1000);
+  const start = performance.now();
+  const problems = boldProblems(text);
+  assert.ok(performance.now() - start < 500, `${Math.round(performance.now() - start)}ms`);
+  assert.equal(problems.length, 500);
+  assert.equal(problems.filter((p) => p.how === '手で直す').length, 480, '修正案を出すのは最初の 20 件まで');
+});
