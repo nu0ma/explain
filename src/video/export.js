@@ -36,25 +36,27 @@ export function findChrome(env = process.env, platform = process.platform) {
   return list.find((p) => (p.includes('/') || p.includes('\\') ? existsSync(p) : hasCommand(p))) ?? null;
 }
 
-export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onProgress = () => {} } = {}) {
-  if (!hasCommand('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
-  const chromePath = findChrome(env);
+// deps でブラウザと ffmpeg の起動を差し替えられる（テスト用）。
+export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onProgress = () => {}, deps = {} } = {}) {
+  const { has = hasCommand, find = findChrome, launch = launchChrome, encoder = spawnFfmpeg } = deps;
+  if (!has('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
+  const chromePath = find(env);
   if (!chromePath) throw new ExportError('Chrome / Chromium / Edge が見つかりません。環境変数 EXPLAIN_CHROME でブラウザのパスを指定できます');
 
   const tmp = mkdtempSync(join(tmpdir(), 'explain-export-'));
-  const chrome = spawn(chromePath, [
-    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${join(tmp, 'profile')}`,
-    '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
-    '--force-device-scale-factor=1', '--window-size=1920,1080', 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let browser = null;
+  let ffmpeg = null;
+  let encoded = false;
   try {
-    const cdp = await connect(await devtoolsUrl(chrome));
+    browser = await launch(chromePath, join(tmp, 'profile'));
+    const { cdp } = browser;
     const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
     const page = (method, params) => cdp.send(method, params, sessionId);
     await page('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
     await page('Page.enable');
     const loaded = cdp.once('Page.loadEventFired');
+    loaded.catch(() => {}); // 読み込みの前に失敗したときに、未処理の reject として残さない。
     await page('Page.navigate', { url: pathToFileURL(htmlFile).href });
     await loaded;
     const evaluate = async (expression) => {
@@ -66,44 +68,74 @@ export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onP
 
     const wavFile = wav ? join(tmp, 'voice.wav') : null;
     if (wav) writeFileSync(wavFile, wav);
-    const ffmpeg = spawn('ffmpeg', [
+    ffmpeg = encoder([
       '-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(info.fps), '-c:v', 'mjpeg', '-i', '-',
       ...(wavFile ? ['-i', wavFile] : []),
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-preset', 'medium',
       ...(wavFile ? ['-c:a', 'aac', '-b:a', '160k', '-shortest'] : []),
       '-movflags', '+faststart', mp4File,
-    ], { stdio: ['pipe', 'ignore', 'pipe'] });
+    ]);
     let ffErr = '';
     ffmpeg.stderr.on('data', (d) => { ffErr += d; });
+    // ffmpeg が途中で落ちたら、フレームを書き込んでいる最中でも失敗として扱う。
     const done = new Promise((resolve, reject) => {
-      ffmpeg.on('error', reject);
+      ffmpeg.on('error', (e) => reject(new ExportError(`ffmpeg を起動できません：${e.message}`)));
       ffmpeg.on('close', (code) => (code === 0 ? resolve() : reject(new ExportError(`ffmpeg が失敗しました（${code}）：${ffErr.slice(0, 300)}`))));
     });
+    done.catch(() => {});
+    const write = (buf) => (ffmpeg.stdin.write(buf) ? null : Promise.race([new Promise((r) => ffmpeg.stdin.once('drain', r)), done]));
 
     const frames = Math.ceil(info.duration * info.fps);
     for (let i = 0; i < frames; i++) {
       await evaluate(`render(${i / info.fps})`);
       const { data } = await page('Page.captureScreenshot', { format: 'jpeg', quality: 92, clip: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 } });
-      if (!ffmpeg.stdin.write(Buffer.from(data, 'base64'))) await new Promise((r) => ffmpeg.stdin.once('drain', r));
+      await write(Buffer.from(data, 'base64'));
       if (i % 30 === 0 || i === frames - 1) onProgress(i + 1, frames);
     }
     ffmpeg.stdin.end();
     await done;
-    cdp.close();
+    encoded = true;
     return { frames, duration: info.duration };
   } finally {
-    await new Promise((r) => {
-      if (chrome.exitCode !== null) return r();
-      const timer = setTimeout(r, 3000);
-      chrome.once('exit', () => { clearTimeout(timer); r(); });
-      chrome.kill();
-    });
+    // 途中で失敗したら ffmpeg も止める。止めないと標準入力が開いたまま残り、CLI が終了しない。
+    if (ffmpeg && !encoded) {
+      ffmpeg.stdin.destroy();
+      ffmpeg.kill('SIGKILL');
+    }
+    if (browser) await browser.stop();
     try {
       rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
     } catch {
       // 一時ディレクトリを消せなくても、できた動画には影響しない。
     }
   }
+}
+
+function spawnFfmpeg(args) {
+  return spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
+}
+
+// ヘッドレスの Chrome を起動して CDP でつなぐ。stop() は Chrome を終了させ、終了を最大 3 秒待つ。
+async function launchChrome(chromePath, profileDir) {
+  const chrome = spawn(chromePath, [
+    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`,
+    '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
+    '--force-device-scale-factor=1', '--window-size=1920,1080', 'about:blank',
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const stop = () => new Promise((r) => {
+    if (chrome.exitCode !== null) return r();
+    const timer = setTimeout(r, 3000);
+    chrome.once('exit', () => { clearTimeout(timer); r(); });
+    chrome.kill();
+  });
+  let cdp;
+  try {
+    cdp = await connect(await devtoolsUrl(chrome));
+  } catch (e) {
+    await stop();
+    throw e;
+  }
+  return { cdp, stop: async () => { cdp.close(); await stop(); } };
 }
 
 function devtoolsUrl(chrome) {
@@ -123,13 +155,25 @@ function devtoolsUrl(chrome) {
 }
 
 // 最小限の CDP クライアント：要求と応答は id で対応づけ、イベントはメソッド名で 1 回だけ待つ。
-function connect(url) {
+// 接続が切れたら（Chrome が落ちたときなど）、応答を待っている要求とイベントをすべて失敗させる。
+export function connect(url, { WebSocketImpl = globalThis.WebSocket } = {}) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocketImpl(url);
     const pending = new Map();
     const waiters = new Map();
     let id = 0;
-    ws.addEventListener('error', () => reject(new ExportError('Chrome DevTools に接続できません')));
+    let closed = null;
+    const failAll = (err) => {
+      if (closed) return;
+      closed = err;
+      for (const { fail } of pending.values()) fail(err);
+      for (const { fail } of waiters.values()) fail(err);
+      pending.clear();
+      waiters.clear();
+      reject(err);
+    };
+    ws.addEventListener('error', () => failAll(new ExportError('Chrome DevTools との接続でエラーが起きました')));
+    ws.addEventListener('close', () => failAll(new ExportError('Chrome DevTools との接続が切れました')));
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.id && pending.has(msg.id)) {
@@ -138,18 +182,22 @@ function connect(url) {
         if (msg.error) fail(new ExportError(`CDP ${msg.error.message}`));
         else ok(msg.result);
       } else if (msg.method && waiters.has(msg.method)) {
-        waiters.get(msg.method)(msg.params);
+        waiters.get(msg.method).ok(msg.params);
         waiters.delete(msg.method);
       }
     });
     ws.addEventListener('open', () => resolve({
       send(method, params = {}, sessionId) {
+        if (closed) return Promise.reject(closed);
         return new Promise((ok, fail) => {
           pending.set(++id, { ok, fail });
           ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
         });
       },
-      once: (method) => new Promise((r) => waiters.set(method, r)),
+      once(method) {
+        if (closed) return Promise.reject(closed);
+        return new Promise((ok, fail) => waiters.set(method, { ok, fail }));
+      },
       close: () => ws.close(),
     }));
   });
