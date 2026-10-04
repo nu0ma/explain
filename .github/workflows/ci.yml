@@ -19,4 +19,6 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run build
+      - name: Check that the committed bundle matches the build
+        run: git diff --exit-code -- skills/explain/scripts/explain.mjs
       - run: pnpm test

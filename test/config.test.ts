@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configPath, explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from '../src/config.ts';
 import { renderDoc } from '../src/render.ts';
@@ -16,12 +16,22 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
-test('explainHome: 既定は ~/.explain-cli。EXPLAIN_HOME で上書きする', () => {
+test('explainHome: 既定は ~/.explain。~/.explain-cli だけがあればそれを使い、EXPLAIN_HOME で上書きする', () => {
   const cases = [
-    { req: {}, want: join(homedir(), '.explain-cli') },
-    { req: { EXPLAIN_HOME: '/x/y' }, want: '/x/y' },
+    { name: 'どちらもない', req: {}, setup: [], want: '.explain' },
+    { name: '旧ディレクトリだけある', req: {}, setup: ['.explain-cli'], want: '.explain-cli' },
+    { name: '両方ある', req: {}, setup: ['.explain-cli', '.explain'], want: '.explain' },
+    { name: 'EXPLAIN_HOME', req: { EXPLAIN_HOME: '/x/y' }, setup: ['.explain-cli'], want: '/x/y' },
   ];
-  for (const { req, want } of cases) assert.equal(explainHome(req), want, JSON.stringify(req));
+  for (const { name, req, setup, want } of cases) {
+    const user = mkdtempSync(join(tmpdir(), 'explain-user-'));
+    try {
+      for (const d of setup) mkdirSync(join(user, d));
+      assert.equal(explainHome(req, user), want.startsWith('/') ? want : join(user, want), name);
+    } finally {
+      rmSync(user, { recursive: true, force: true });
+    }
+  }
   assert.equal(configPath(env), join(home, 'config.json'));
 });
 

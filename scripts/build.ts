@@ -1,7 +1,9 @@
-// Bundle the CLI into the single file dist/explain.mjs.
+// Bundle the CLI into the single file skills/explain/scripts/explain.mjs, which the plugin ships and the skill runs.
 // The output references neither node_modules nor src/, so it runs on its own wherever Node is installed.
+// Pass a path as the first argument to write the bundle somewhere else (tests use this).
 import { build, type Plugin } from 'esbuild';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -25,7 +27,7 @@ const inlineAssets: Plugin = {
 
 await build({
   entryPoints: [fileURLToPath(new URL('../bin/explain.ts', import.meta.url))],
-  outfile: fileURLToPath(new URL('../dist/explain.mjs', import.meta.url)),
+  outfile: process.argv[2] ? resolve(process.argv[2]) : fileURLToPath(new URL('../skills/explain/scripts/explain.mjs', import.meta.url)),
   bundle: true,
   platform: 'node',
   format: 'esm',

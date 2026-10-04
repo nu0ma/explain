@@ -1,6 +1,6 @@
 # explain
 
-A CLI that turns a Markdown script into a self-contained, single-file explainer HTML page and a 3Blue1Brown-style explainer video. It is a personal tool rebuilt for one engineer who works in Japanese, so both the generated output and the CLI messages are Japanese only.
+A Claude Code plugin and CLI that turn a Markdown script into a self-contained, single-file explainer HTML page and a 3Blue1Brown-style explainer video. It is a personal tool rebuilt for one engineer who works in Japanese, so both the generated output and the CLI messages are Japanese only.
 
 ## Demo
 
@@ -25,7 +25,16 @@ Built from [transactional-outbox.video.md](docs/demo/transactional-outbox.video.
 - Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
 - With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript.
 
-## Usage
+## Install as a Claude Code plugin
+
+```sh
+/plugin marketplace add nu0ma/explain
+/plugin install explain@explain
+```
+
+The plugin ships the `explain` skill and a single-file build of the CLI (`skills/explain/scripts/explain.mjs`), so it needs only Node 24.21 or later. Ask the agent to explain something visually ("図にして", "動画で説明して"), or type `/explain`. The agent writes the script, renders it, and fixes the reported warnings. `/explain:config` and `/explain:cache` show or change the settings and the narration cache.
+
+## Use the CLI directly
 
 ```sh
 pnpm install
@@ -44,8 +53,8 @@ explain config                                      # show and change settings
 explain cache [clear]                               # show (or clear) the narration audio cache
 ```
 
-- Output goes to `~/.explain-cli/pages/` and `~/.explain-cli/videos/`; settings live in `~/.explain-cli/config.json`. Set `EXPLAIN_HOME` to change the location.
-- `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 24.21 or later. The sources are TypeScript and run directly on Node without a build step.
+- Output goes to `~/.explain/pages/` and `~/.explain/videos/`; settings live in `~/.explain/config.json`. Set `EXPLAIN_HOME` to change the location. If only `~/.explain-cli/` (the directory from before the rename) exists, the CLI keeps using it.
+- `pnpm run build` writes `skills/explain/scripts/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 24.21 or later. The bundle is committed so that the plugin works without `pnpm install`; rebuild it whenever `src/` changes, because CI fails when it differs from the build output. The sources are TypeScript and run directly on Node without a build step.
 - Video narration is synthesized only with macOS `say`, using a Japanese voice (Kyoko, Eddy, Flo, or Reed, in that order). No external TTS service or API key is used. On other platforms, use `--voice off` for a subtitles-only video.
 
 ## Stable flow node IDs
@@ -71,6 +80,22 @@ apm install --frozen
 ```
 
 Then ask your agent to apply yomiyasu to the script, and run `explain lint` again to confirm the warnings are gone. Findings marked `（参考）` are yomiyasu's `info` level and do not block `style: strict`.
+
+## Evaluating the prompt
+
+What the reader gets out of a page depends mostly on the script the agent writes, so `skills/explain/SKILL.md`, `commands/*.md`, and the CLI help text (`explain help format`, `explain help video`, `explain help <component>`) are the prompt. After changing any of them, run the eval suite in `evals/` and compare the scores with the previous run:
+
+```sh
+claude plugin eval . --judge-model sonnet --allow-tools 'Bash(node:*)' Write   # all cases, with the no-plugin baseline
+claude plugin eval . --judge-model sonnet --allow-tools 'Bash(node:*)' Write --tag quality   # a subset: quality, trigger, quiet, args, video
+```
+
+- Cases in `quality` grade the script the agent wrote; `trigger` and `quiet` check that the skill loads only when it should; `args` checks `/explain config`.
+- The default judge (haiku) fails good video scripts too often, so pass `--judge-model sonnet`.
+- The eval sandbox cannot start Chrome or macOS `say`, so `--png` falls back to no image and videos get subtitles only. The graders read the script and the CLI report, not the images.
+- If `node` on your `PATH` is not Node 24.21 or later, also allow the absolute path of a suitable `node`, for example `--allow-tools "Bash($(mise which node):*)"`.
+
+Each case runs 3 times with the plugin and 3 times without it by default, and every run uses model credit, so the suite runs locally and not in CI.
 
 ## License
 

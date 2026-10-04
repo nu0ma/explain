@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["dist/", "coverage/", "apm_modules/", ".claude/"],
+  "ignorePatterns": ["skills/explain/scripts/", "coverage/", "apm_modules/", ".claude/"],
   "categories": { "correctness": "error" },
   "env": { "node": true, "es2024": true },
   "rules": {

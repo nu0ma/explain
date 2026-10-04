@@ -1,4 +1,4 @@
-# explain-cli
+# explain
 
 ## コミットメッセージとPRのタイトル
 
@@ -10,6 +10,12 @@
 ソースはTypeScriptで書き、ビルドせずにNodeで直接動かす。
 Nodeの型の除去で動かすので、enumやnamespaceなど消せない構文は使わない。
 コードのコメントは英語で書く。
+
+## プロンプトの評価
+
+`skills/explain/SKILL.md`、`commands/*.md`、CLIのヘルプ（`explain help`）はエージェントへのプロンプトになる。
+変えたら`evals/`の評価を`claude plugin eval`で走らせ、前回の点と比べる。手順はREADMEに書いてある。
+`src/`を変えたら`pnpm run build`で`skills/explain/scripts/explain.mjs`を作り直してコミットする。
 
 ## 日本語の文章
 

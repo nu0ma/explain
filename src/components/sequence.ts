@@ -69,6 +69,10 @@ note A, C: 複数の参加者にまたがる注記
 \`\`\`
 - 引数 num：メッセージに番号をつける。`,
   example: '```sequence\nClient -> Server: SYN\nServer --> Client: SYN-ACK\nClient -> Server: ACK\nnote Client, Server: ESTABLISHED\n```',
+  tips: `- 複数の参加者がメッセージを順にやりとりする流れを示すときに使う。順番に意味がなければflowを使う。
+- 参加者は説明に要る分だけにする。5人を超えるときは、まとめられる参加者をまとめる。
+- メッセージには、関数名ではなく、何を頼むか、何を返すかを書く。
+- 段階が変わるところに「== 区切り ==」を入れる。`,
   render(text, { args, uid }) {
     const model = parseSequence(text);
     return `<figure class="am-diagram am-seq">${layout(model, { num: /\bnum\b/.test(args), id: uid() })}</figure>`;

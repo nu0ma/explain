@@ -1,0 +1,17 @@
+{
+  "name": "explain",
+  "owner": {
+    "name": "Ryota Ishikawa",
+    "url": "https://github.com/nu0ma"
+  },
+  "metadata": {
+    "description": "The explain plugin: explainer pages and videos rendered from a Markdown script."
+  },
+  "plugins": [
+    {
+      "name": "explain",
+      "source": "./",
+      "description": "Explains something as a single-file explainer HTML page or a narrated explainer video (Japanese output)."
+    }
+  ]
+}

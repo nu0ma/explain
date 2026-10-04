@@ -1,0 +1,18 @@
+{
+  "name": "explain",
+  "description": "Explains something as a single-file explainer HTML page or a narrated explainer video. The agent writes a Markdown script and the bundled CLI renders it (Japanese output).",
+  "author": {
+    "name": "Ryota Ishikawa",
+    "url": "https://github.com/nu0ma"
+  },
+  "homepage": "https://github.com/nu0ma/explain",
+  "repository": "https://github.com/nu0ma/explain",
+  "license": "MIT",
+  "keywords": [
+    "explainer",
+    "diagram",
+    "html",
+    "video",
+    "japanese"
+  ]
+}

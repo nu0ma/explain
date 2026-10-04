@@ -13,6 +13,8 @@ export default {
 \`\`\`
 - 最初のコロン（: か ：）で分ける。値の中にはコロンを書いてよい。`,
   example: '```kv cols=2\n* Title: Simplified Technical English\nSpecification: ASD-STE100\nOwner: ASD\n```',
+  tips: `- ページの表題欄や、対象のメタ情報（PR、期間、担当など）をまとめるときに使う。
+- 項目どうしを比べるときはMarkdownの表を使う。`,
   render(text, { args }) {
     const cols = Math.max(1, Math.min(Number(parseAttrs(args).cols) || 2, 6));
     const cells = contentLines(text).map(({ text: t, line }) => {

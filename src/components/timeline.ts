@@ -14,6 +14,9 @@ export default {
 \`\`\`
 - 6 項目以下は横、7 項目以上は縦に並べる。引数 h / v で向きを固定できる。`,
   example: '```timeline\n4/1 | 設計レビュー\n4/8 | 実装\n*4/15 | リリース | 本番に反映\n```',
+  tips: `- 障害の経緯やリリースの段階のように、時間の順に意味があるものに使う。
+- 日付と時刻は入力にある値を使う。分からない時期は書かない。
+- 読者に見てほしい転機の項目に*を付ける。`,
   render(text, { args }) {
     const items = contentLines(text).map(({ text: t, line }): TimelineItem => {
       const parts = fields(t);

@@ -25,7 +25,9 @@ export default {
 - 字下げ（空白か Tab）で階層を表す。"ラベル | 説明" で灰色の説明をつける。
 - 根が 1 つで子が 2〜4 個 → 組織図。子がもっと多いか引数 list → 字下げリスト。根が複数 → 横に並べる。
 - ラベルにはインラインの Markdown を使える（例：\`src/\` ソース）。`,
-  example: '```tree\nexplain-cli | 解説 HTML を作る CLI\n  src/\n    `cli.js` 入口\n  test/\n    lint.test.js | STE 検査のテスト\n```',
+  example: '```tree\nexplain | 解説 HTML を作る CLI\n  src/\n    `cli.js` 入口\n  test/\n    lint.test.js | STE 検査のテスト\n```',
+  tips: `- ディレクトリ、組織、分類のように親子の関係があるものに使う。親子でないつながりはflowで示す。
+- 説明に関係する枝だけを残し、ほかは省く。`,
   render(text, { args }) {
     const roots = buildTree(text);
     if (!roots.length) throw new ComponentError('tree にはノードが 1 つ以上必要です', 1);

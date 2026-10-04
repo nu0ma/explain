@@ -36,6 +36,8 @@ export default {
 \`\`\`
 - 現在値が上限を超えると行全体が赤くなる。上限は "max 20" とも書ける。`,
   example: '```limits\n手順の文 | 28 / 35 | 字\n説明の文 | max 45 | 字\n1 段落の文 | 8 / 6 | 文 | 超過\n```',
+  tips: `- 実際の値を上限と比べるときに使う。入力に実際の数値がなければ使わない。
+- 例として作った数値を使うときは、備考かパネルの本文にそう書く。`,
   render(text) {
     const rows = contentLines(text).map(({ text: t, line }) => parseRow(t, line));
     if (!rows.length) throw new ComponentError('limits には 1 行以上必要です', 1);

@@ -10,5 +10,7 @@ export type Component = {
   summary: string;
   syntax: string;
   example: string;
+  // When to use the component and how to use it well, printed by `explain help <name>`.
+  tips: string;
   render: (text: string, ctx: RenderContext) => string;
 };

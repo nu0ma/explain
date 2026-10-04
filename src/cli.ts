@@ -81,7 +81,7 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
   explain help [部品名|format|video]                 部品の書き方・原稿の書式
 
 - ファイルの代わりに - を渡すと標準入力から読む（heredoc 向け：explain render - <<'EOF' ... EOF）。
-- 出力先の既定は ~/.explain-cli/pages/ と ~/.explain-cli/videos/（環境変数 EXPLAIN_HOME で変更できる）。
+- 出力先の既定は ~/.explain/pages/ と ~/.explain/videos/（環境変数 EXPLAIN_HOME で変更できる）。
 - --watch はローカルのサーバーからページを配信し、原稿を保存するたびに作り直す（Ctrl+C で終了）。-o を渡すとファイルにも書く。
 - --static は <script> を含まない HTML を出す（切り替えボタンと原稿コピーなし。配色は OS の設定に従う）。
 - --png は Chrome でページを開き、ページ全体の画像を HTML と同じ名前の .png に保存する。あわせてレイアウトを検査し、
@@ -156,7 +156,7 @@ Client -> Server: ACK
 - となりあう場面に同じ名前のノードや参加者があると、前の位置から次の位置へなめらかに動く（場面をまたぐ変形）。
 - 部品で表せない図は html / svg ブロックで書く。要素に data-step="N" を付けると手順になり、data-key="名前" を付けると [名前] のカメラと場面をまたぐ変形の対象になる（explain help format）。
 - 音声：--voice say（既定。macOSのsayで読み上げる。日本語の声はKyoko、Eddy、Flo、Reedの順に探す）| off（字幕だけ）。
-- 出力先は ~/.explain-cli/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg が必要）。
+- 出力先は ~/.explain/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg が必要）。
 - ffmpeg があれば、再生ページに埋め込む音声を AAC に圧縮する（なければ WAV のまま）。
 - 動画は再生に JavaScript が要るため、--static は使えない。`;
 
@@ -575,7 +575,7 @@ function cmdHelp(name: string | undefined, { print, fail }: Pick<Context, 'print
     fail(`✗ "${name}" という部品はありません。使えるもの：${[...COMPONENTS.keys()].join(', ')}, format, video`);
     return 2;
   }
-  print(`${comp.name} — ${comp.summary}\n\n${comp.syntax}\n\n例：\n${comp.example}`);
+  print(`${comp.name} — ${comp.summary}\n\n${comp.syntax}\n\n使いどころ：\n${comp.tips}\n\n例：\n${comp.example}`);
   return 0;
 }
 

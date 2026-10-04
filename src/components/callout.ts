@@ -13,6 +13,8 @@ export default {
 \`\`\`
 - 最初の引数が種類でないときは、引数全体を見出しにして、種類は info になる。`,
   example: '```callout warn 注意\nバルブを閉じてから、ポンプを外す。\n```',
+  tips: `- 結論は最初のパネルに、種類をokかinfoにしたcalloutで書く。読者が作業の前に知るべき注意はwarn、失敗や障害につながることはerrにする。
+- 1つのパネルに置くのは1つまでにする。`,
   render(text, { args }) {
     const [first = '', ...rest] = args.split(/\s+/).filter(Boolean);
     const kind = KINDS.has(first) ? first : 'info';

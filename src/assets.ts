@@ -1,5 +1,5 @@
 // Static resources used at run time. In development they are read from disk. The build (scripts/build.ts)
-// replaces this whole module with inline strings, so dist/explain.mjs depends on no external files.
+// replaces this whole module with inline strings, so the bundle depends on no external files.
 import { readFileSync } from 'node:fs';
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');

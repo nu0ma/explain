@@ -1,4 +1,4 @@
-// User settings: ~/.explain-cli/config.json (EXPLAIN_HOME changes the location).
+// User settings: ~/.explain/config.json (EXPLAIN_HOME changes the location).
 // Only keys the user set explicitly are stored; they are merged with the defaults on read.
 // A broken file or an invalid value falls back to the default, so settings never stop a render.
 
@@ -44,8 +44,13 @@ export function isConfigKey(key: string): key is ConfigKey {
 const TRUE = new Set(['on', 'true', 'yes', '1', 'オン']);
 const FALSE = new Set(['off', 'false', 'no', '0', 'オフ']);
 
-export function explainHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.EXPLAIN_HOME || join(homedir(), '.explain-cli');
+// ~/.explain-cli/ is the directory from before the rename. Keep using it until ~/.explain/ exists,
+// so existing settings and the narration cache are not lost.
+export function explainHome(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  if (env.EXPLAIN_HOME) return env.EXPLAIN_HOME;
+  const dir = join(home, '.explain');
+  const legacy = join(home, '.explain-cli');
+  return !existsSync(dir) && existsSync(legacy) ? legacy : dir;
 }
 
 export function configPath(env: NodeJS.ProcessEnv = process.env): string {
