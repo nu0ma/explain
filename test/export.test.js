@@ -10,11 +10,11 @@ import { exportMp4, connect, ExportError } from '../src/video/export.js';
 function fakeFfmpeg({ exitCode = 0, stderr = '' } = {}) {
   const proc = new EventEmitter();
   proc.args = null;
-  proc.frames = 0;
+  proc.frames = [];
   proc.killed = null;
   proc.stderr = new EventEmitter();
   proc.stdin = new Writable({
-    write(_chunk, _enc, cb) { proc.frames++; cb(); },
+    write(chunk, _enc, cb) { proc.frames.push(chunk.toString()); cb(); },
     final(cb) {
       cb();
       setImmediate(() => {
@@ -27,21 +27,24 @@ function fakeFfmpeg({ exitCode = 0, stderr = '' } = {}) {
   return proc;
 }
 
-// Chrome の代わり：再生ページの情報を返し、failAt 番目のフレームでスクリプトのエラーを返す。
+// Chrome の代わり：タブごとに最後に描いた時刻を覚え、スクリーンショットとして "f<時刻>" を返す。
+// failAt の時刻を描こうとするとスクリプトのエラーを返す。
 function fakeBrowser({ duration = 1, fps = 4, failAt = -1 } = {}) {
-  let frame = -1;
-  const browser = { stopped: false, profileDir: null };
+  let targets = 0;
+  const drawn = new Map();
+  const browser = { stopped: false, profileDir: null, tabs: 0 };
   browser.cdp = {
-    async send(method, params) {
-      if (method === 'Target.createTarget') return { targetId: 't' };
-      if (method === 'Target.attachToTarget') return { sessionId: 's' };
+    async send(method, params, sessionId) {
+      if (method === 'Target.createTarget') return { targetId: `t${++targets}` };
+      if (method === 'Target.attachToTarget') { browser.tabs++; return { sessionId: `s-${params.targetId}` }; }
       if (method === 'Runtime.evaluate') {
         if (params.expression.startsWith('document.fonts')) return { result: { value: { duration, fps } } };
-        frame++;
-        if (frame === failAt) return { exceptionDetails: { text: 'boom' } };
+        const t = Number(params.expression.match(/^render\((.+)\)$/)[1]);
+        if (t === failAt) return { exceptionDetails: { text: 'boom' } };
+        drawn.set(sessionId, t);
         return { result: {} };
       }
-      if (method === 'Page.captureScreenshot') return { data: Buffer.from('jpg').toString('base64') };
+      if (method === 'Page.captureScreenshot') return { data: Buffer.from(`f${drawn.get(sessionId)}`).toString('base64') };
       return {};
     },
     once: async () => ({}),
@@ -61,17 +64,18 @@ function setup({ browser = fakeBrowser(), ffmpeg = fakeFfmpeg(), has = () => tru
   return { browser, ffmpeg, progress, opts: { deps, onProgress: (i, n) => progress.push([i, n]) } };
 }
 
-test('exportMp4: 全フレームを ffmpeg に渡し、ブラウザを止めて一時ディレクトリを消す', async () => {
+test('exportMp4: 全フレームを順に ffmpeg に渡し、ブラウザを止めて一時ディレクトリを消す', async () => {
   const cases = [
-    { name: '音声なし', wav: undefined, wantAudio: false },
-    { name: '音声あり', wav: Buffer.from('RIFF'), wantAudio: true },
+    { name: '音声なし・タブ 1 枚', wav: undefined, concurrency: 1, wantAudio: false, wantProgress: [[1, 4], [4, 4]] },
+    { name: '音声あり・タブ 3 枚', wav: Buffer.from('RIFF'), concurrency: 3, wantAudio: true, wantProgress: [[3, 4], [4, 4]] },
   ];
-  for (const { name, wav, wantAudio } of cases) {
+  for (const { name, wav, concurrency, wantAudio, wantProgress } of cases) {
     const { browser, ffmpeg, progress, opts } = setup();
-    const got = await exportMp4('/x/page.html', '/x/out.mp4', { ...opts, wav });
+    const got = await exportMp4('/x/page.html', '/x/out.mp4', { ...opts, wav, concurrency });
     assert.deepEqual(got, { frames: 4, duration: 1 }, name);
-    assert.equal(ffmpeg.frames, 4, name);
-    assert.deepEqual(progress, [[1, 4], [4, 4]], name);
+    assert.equal(browser.tabs, concurrency, name);
+    assert.deepEqual(ffmpeg.frames, ['f0', 'f0.25', 'f0.5', 'f0.75'], name);
+    assert.deepEqual(progress, wantProgress, name);
     assert.equal(ffmpeg.args.includes('-shortest'), wantAudio, name);
     assert.equal(ffmpeg.args.at(-1), '/x/out.mp4', name);
     assert.equal(ffmpeg.killed, null, name);
@@ -82,7 +86,7 @@ test('exportMp4: 全フレームを ffmpeg に渡し、ブラウザを止めて�
 
 test('exportMp4: 途中で失敗したら ExportError にし、ffmpeg とブラウザを止める', async () => {
   const cases = [
-    { name: 'スクリプトのエラー', browser: fakeBrowser({ failAt: 2 }), ffmpeg: fakeFfmpeg(), wantErr: /スクリプトでエラー.*boom/, wantKilled: 'SIGKILL' },
+    { name: 'スクリプトのエラー', browser: fakeBrowser({ failAt: 0.5 }), ffmpeg: fakeFfmpeg(), wantErr: /スクリプトでエラー.*boom/, wantKilled: 'SIGKILL' },
     { name: 'ffmpeg の異常終了', browser: fakeBrowser(), ffmpeg: fakeFfmpeg({ exitCode: 1, stderr: 'bad codec' }), wantErr: /ffmpeg が失敗しました（1）：bad codec/, wantKilled: 'SIGKILL' },
   ];
   for (const { name, browser, ffmpeg, wantErr, wantKilled } of cases) {
@@ -131,6 +135,13 @@ test('connect: 応答を id で対応づけ、イベントを 1 回だけ待つ'
   ws.reply({ method: 'Page.loadEventFired', params: { t: 1 } });
   assert.deepEqual(await res, { ok: true });
   assert.deepEqual(await ev, { t: 1 });
+
+  // 同じイベントでもセッションごとに分けて待つ。
+  const s1 = cdp.once('Page.loadEventFired', 's1');
+  const s2 = cdp.once('Page.loadEventFired', 's2');
+  ws.reply({ method: 'Page.loadEventFired', sessionId: 's2', params: { tab: 2 } });
+  ws.reply({ method: 'Page.loadEventFired', sessionId: 's1', params: { tab: 1 } });
+  assert.deepEqual(await Promise.all([s1, s2]), [{ tab: 1 }, { tab: 2 }]);
 
   const bad = cdp.send('X.y');
   ws.reply({ id: 2, error: { message: 'no such method' } });

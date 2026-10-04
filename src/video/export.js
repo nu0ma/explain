@@ -2,7 +2,7 @@
 // ffmpeg で H.264 にエンコードしてナレーションの音声と合わせる。Playwright や Puppeteer は使わない。
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hasCommand } from './tts.js';
@@ -36,8 +36,9 @@ export function findChrome(env = process.env, platform = process.platform) {
   return list.find((p) => (p.includes('/') || p.includes('\\') ? existsSync(p) : hasCommand(p))) ?? null;
 }
 
+// render(t) は決定的なので、同じページを concurrency 枚のタブで開き、フレームを分けて並列に撮る。
 // deps でブラウザと ffmpeg の起動を差し替えられる（テスト用）。
-export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onProgress = () => {}, deps = {} } = {}) {
+export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onProgress = () => {}, concurrency = Math.min(4, availableParallelism()), deps = {} } = {}) {
   const { has = hasCommand, find = findChrome, launch = launchChrome, encoder = spawnFfmpeg } = deps;
   if (!has('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
   const chromePath = find(env);
@@ -49,22 +50,9 @@ export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onP
   let encoded = false;
   try {
     browser = await launch(chromePath, join(tmp, 'profile'));
-    const { cdp } = browser;
-    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
-    const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
-    const page = (method, params) => cdp.send(method, params, sessionId);
-    await page('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
-    await page('Page.enable');
-    const loaded = cdp.once('Page.loadEventFired');
-    loaded.catch(() => {}); // 読み込みの前に失敗したときに、未処理の reject として残さない。
-    await page('Page.navigate', { url: pathToFileURL(htmlFile).href });
-    await loaded;
-    const evaluate = async (expression) => {
-      const r = await page('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      if (r.exceptionDetails) throw new ExportError(`再生ページのスクリプトでエラーが起きました：${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
-      return r.result.value;
-    };
-    const info = await evaluate('document.fonts.ready.then(() => { window.__amv.exportMode(); return { duration: window.__amv.duration, fps: window.__amv.fps }; })');
+    const pages = await Promise.all(Array.from({ length: Math.max(1, concurrency) }, () => openPage(browser.cdp, htmlFile)));
+    const infos = await Promise.all(pages.map((p) => p.evaluate('document.fonts.ready.then(() => { window.__amv.exportMode(); return { duration: window.__amv.duration, fps: window.__amv.fps }; })')));
+    const info = infos[0];
 
     const wavFile = wav ? join(tmp, 'voice.wav') : null;
     if (wav) writeFileSync(wavFile, wav);
@@ -86,11 +74,21 @@ export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onP
     const write = (buf) => (ffmpeg.stdin.write(buf) ? null : Promise.race([new Promise((r) => ffmpeg.stdin.once('drain', r)), done]));
 
     const frames = Math.ceil(info.duration * info.fps);
-    for (let i = 0; i < frames; i++) {
-      await evaluate(`render(${i / info.fps})`);
-      const { data } = await page('Page.captureScreenshot', { format: 'jpeg', quality: 92, clip: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 } });
-      await write(Buffer.from(data, 'base64'));
-      if (i % 30 === 0 || i === frames - 1) onProgress(i + 1, frames);
+    const capture = async (p, i) => {
+      await p.evaluate(`render(${i / info.fps})`);
+      const { data } = await p.send('Page.captureScreenshot', { format: 'jpeg', quality: 92, clip: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 } });
+      return Buffer.from(data, 'base64');
+    };
+    // タブの数ずつまとめて撮り、フレームの順に ffmpeg へ渡す。まとめる数を抑えて、メモリに貯めるフレームを増やさない。
+    let reported = -1;
+    for (let i = 0; i < frames; i += pages.length) {
+      const batch = await Promise.all(pages.slice(0, frames - i).map((p, k) => capture(p, i + k)));
+      for (const buf of batch) await write(buf);
+      const n = i + batch.length;
+      if (Math.floor((n - 1) / 30) > reported || n === frames) {
+        reported = Math.floor((n - 1) / 30);
+        onProgress(n, frames);
+      }
     }
     ffmpeg.stdin.end();
     await done;
@@ -109,6 +107,25 @@ export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onP
       // 一時ディレクトリを消せなくても、できた動画には影響しない。
     }
   }
+}
+
+// 新しいタブで再生ページを開き、読み込みを待つ。send と evaluate はそのタブに向けて送る。
+async function openPage(cdp, htmlFile) {
+  const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
+  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
+  const send = (method, params) => cdp.send(method, params, sessionId);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await send('Page.enable');
+  const loaded = cdp.once('Page.loadEventFired', sessionId);
+  loaded.catch(() => {}); // 読み込みの前に失敗したときに、未処理の reject として残さない。
+  await send('Page.navigate', { url: pathToFileURL(htmlFile).href });
+  await loaded;
+  const evaluate = async (expression) => {
+    const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new ExportError(`再生ページのスクリプトでエラーが起きました：${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
+    return r.result.value;
+  };
+  return { send, evaluate };
 }
 
 function spawnFfmpeg(args) {
@@ -154,7 +171,7 @@ function devtoolsUrl(chrome) {
   });
 }
 
-// 最小限の CDP クライアント：要求と応答は id で対応づけ、イベントはメソッド名で 1 回だけ待つ。
+// 最小限の CDP クライアント：要求と応答は id で対応づけ、イベントはセッションとメソッド名の組で 1 回だけ待つ。
 // 接続が切れたら（Chrome が落ちたときなど）、応答を待っている要求とイベントをすべて失敗させる。
 export function connect(url, { WebSocketImpl = globalThis.WebSocket } = {}) {
   return new Promise((resolve, reject) => {
@@ -181,9 +198,10 @@ export function connect(url, { WebSocketImpl = globalThis.WebSocket } = {}) {
         pending.delete(msg.id);
         if (msg.error) fail(new ExportError(`CDP ${msg.error.message}`));
         else ok(msg.result);
-      } else if (msg.method && waiters.has(msg.method)) {
-        waiters.get(msg.method).ok(msg.params);
-        waiters.delete(msg.method);
+      } else if (msg.method && waiters.has(`${msg.sessionId ?? ''}:${msg.method}`)) {
+        const key = `${msg.sessionId ?? ''}:${msg.method}`;
+        waiters.get(key).ok(msg.params);
+        waiters.delete(key);
       }
     });
     ws.addEventListener('open', () => resolve({
@@ -194,9 +212,9 @@ export function connect(url, { WebSocketImpl = globalThis.WebSocket } = {}) {
           ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
         });
       },
-      once(method) {
+      once(method, sessionId) {
         if (closed) return Promise.reject(closed);
-        return new Promise((ok, fail) => waiters.set(method, { ok, fail }));
+        return new Promise((ok, fail) => waiters.set(`${sessionId ?? ''}:${method}`, { ok, fail }));
       },
       close: () => ws.close(),
     }));
