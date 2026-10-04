@@ -1,7 +1,7 @@
 name: explain-cli
 version: 1.0.0
 description: APM project for explain-cli
-author: Ryota Ishikawa
+author: nu0ma
 # Which agent platforms to deploy to.
 # Resolution order: --target flag > this field > auto-detect from filesystem.
 # Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, kiro, opencode, vscode, windsurf
