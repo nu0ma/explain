@@ -1,0 +1,129 @@
+// 原稿 → 1 ファイルの HTML。流れ：parse → STE 検査 → パネルを描画（Markdown / 部品 / raw）→ テンプレートに当てはめる → CSS とランタイムをインライン化。
+
+import { parseDoc, ParseError, CHOICES } from './parse.js';
+import { md } from './markdown.js';
+import { COMPONENTS, RAW_LANGS, ComponentError } from './components/index.js';
+import { TEMPLATES } from './templates/index.js';
+import { pageCss } from './themes/index.js';
+import { lintDoc } from './lint/ste.js';
+import { esc } from './svg/text.js';
+import { VERSION, RUNTIME_JS } from './assets.js';
+
+export class RenderError extends Error {
+  constructor(message, { line, component, example } = {}) {
+    super(message);
+    this.name = 'RenderError';
+    this.line = line;
+    this.component = component;
+    this.example = example;
+  }
+}
+
+export class LintError extends Error {
+  constructor(warnings) {
+    super(`STE 検査で警告が ${warnings.length} 件あります（style: strict）`);
+    this.name = 'LintError';
+    this.warnings = warnings;
+  }
+}
+
+// ページ上のボタンの文言。
+export const UI = Object.freeze({
+  theme: { blueprint: 'テーマ：図面', shadcn: 'テーマ：カード' },
+  mode: { auto: '配色：システムに合わせる', light: '配色：ライト', dark: '配色：ダーク' },
+  copy: '原稿をコピー',
+  done: 'コピーしました ✓',
+});
+
+// 静的出力に紛れ込んだ JavaScript を見つける（html ブロックや Markdown 中の生 HTML 由来）。
+const SCRIPT_LIKE = /<script\b|<[^>]+\son[a-z]+\s*=|javascript:/i;
+
+// overrides.static（--static）か frontmatter の static: true で、<script> を含まない HTML を出す。
+export function renderDoc(source, overrides = {}, defaults = {}) {
+  const doc = parseDoc(source, { defaults });
+  const { static: staticFlag, ...rest } = overrides;
+  for (const [key, value] of Object.entries(rest)) {
+    if (value === undefined) continue;
+    if (CHOICES[key] && !CHOICES[key].includes(String(value))) {
+      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${CHOICES[key].join(' | ')}`, 0);
+    }
+    doc.meta[key] = value;
+  }
+  if (doc.meta.template === 'video') throw new ParseError('template: video は動画の原稿です。explain video で作ってください', 0);
+  const isStatic = staticFlag === true || doc.meta.static === 'true';
+  // 静的出力は JS で配色を切り替えられないので、OS の設定（prefers-color-scheme）に従わせる。
+  if (isStatic) doc.meta.mode = 'auto';
+
+  const warnings = doc.meta.style === 'off' ? [] : lintDoc(doc);
+  if (doc.meta.style === 'strict' && warnings.length) throw new LintError(warnings);
+
+  const stats = { panels: doc.panels.length, components: {} };
+  const ctx = { seq: 0, stats };
+  const introHtml = renderBlocks(doc.intro, ctx);
+  const panels = doc.panels.map((p) => ({ ...p, html: renderBlocks(p.blocks, ctx) }));
+  const body = TEMPLATES[doc.meta.template]({ meta: doc.meta, introHtml, panels });
+  const html = shell({ meta: doc.meta, body, source, isStatic });
+  if (isStatic && SCRIPT_LIKE.test(html)) {
+    throw new ParseError('静的出力（--static / static: true）には JavaScript を入れられません。html ブロックなどにある <script>、on〜 属性、javascript: を削除してください', 0);
+  }
+  return { html, warnings, stats, meta: doc.meta, static: isStatic };
+}
+
+export function renderBlocks(blocks, ctx) {
+  return blocks.map((b) => (b.type === 'md' ? `<div class="am-md">${md(b.text)}</div>` : renderFence(b, ctx))).join('\n');
+}
+
+function renderFence(block, ctx) {
+  const { lang, args, text, line } = block;
+  if (RAW_LANGS.has(lang)) return text;
+  const comp = COMPONENTS.get(lang);
+  if (!comp) {
+    return `<pre class="am-code"><code${lang ? ` data-lang="${esc(lang)}"` : ''}>${esc(text)}</code></pre>`;
+  }
+  ctx.stats.components[lang] = (ctx.stats.components[lang] ?? 0) + 1;
+  try {
+    return comp.render(text, { args, uid: () => `am${++ctx.seq}` });
+  } catch (err) {
+    if (!(err instanceof ComponentError)) throw err;
+    throw new RenderError(err.message, {
+      line: line + (err.line || 0),
+      component: lang,
+      example: comp.example,
+    });
+  }
+}
+
+export function timestamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function shell({ meta, body, source, isStatic }) {
+  const toolbar = isStatic ? '' : `<div class="am-toolbar">
+<button class="am-btn" type="button" data-am="theme" data-labels="${esc(JSON.stringify(UI.theme))}">${esc(UI.theme[meta.theme])}</button>
+<button class="am-btn" type="button" data-am="mode" data-labels="${esc(JSON.stringify(UI.mode))}">${esc(UI.mode[meta.mode])}</button>
+<button class="am-btn" type="button" data-am="copy" data-done="${esc(UI.done)}">${esc(UI.copy)}</button>
+</div>
+`;
+  const tail = isStatic ? '' : `<textarea id="am-source" hidden readonly aria-hidden="true">${esc(source)}</textarea>
+<script>
+${RUNTIME_JS}</script>
+`;
+  return `<!doctype html>
+<html lang="ja" data-theme="${esc(meta.theme)}" data-mode="${esc(meta.mode)}"${isStatic ? ' data-static' : ''}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="explain ${VERSION}">
+<title>${esc(meta.title || '無題')}</title>
+<style>
+${pageCss()}
+</style>
+</head>
+<body>
+${toolbar}${body}
+<footer class="am-colophon">explain ${VERSION} で生成 · ${esc(timestamp())}</footer>
+${tail}</body>
+</html>
+`;
+}
