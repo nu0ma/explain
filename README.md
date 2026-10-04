@@ -43,5 +43,3 @@ Then ask your agent to apply yomiyasu to the script, and run `explain lint` agai
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-The checks in `src/lint/yomiyasu.js` are ported from `scripts/yomiyasu_lint.py` in [yomiyasu](https://github.com/nanaism/yomiyasu) v1.0.5, and `test/fixtures/yomiyasu/` contains its bold-rendering test fixtures (MIT License, Copyright (c) 2026 nanaism). The full notice is kept in `src/lint/yomiyasu.js` and `test/fixtures/yomiyasu/LICENSE`.
