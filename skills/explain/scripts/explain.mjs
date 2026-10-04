@@ -469,9 +469,14 @@ html[data-video] .am-diagram .am-edge-label text { fill: var(--ink-2); }
 }
 html[data-video] .am-diagram .amv-hl text, html[data-video] .am-diagram text.amv-hl { fill: var(--accent); font-weight: 600; }
 .amv-hl .am-edge { stroke: var(--accent); stroke-width: 2.4; }
-.amv-hl.am-tree-box, .amv-hl.am-tl-item, .amv-hl.am-lim, .amv-hl.am-kv-cell, li.amv-hl > .am-tree-label, tr.amv-hl td, .amv-hl.am-seg {
+.amv-hl.am-tree-box, .amv-hl.am-tl-item, .amv-hl.am-lim, .amv-hl.am-kv-cell, li.amv-hl > .am-tree-label, .amv-hl.am-seg {
   color: var(--accent); outline: 2.5px solid var(--accent); outline-offset: 4px; border-radius: 4px;
 }
+/* An outline on each cell would draw a box per cell, so a row gets one frame drawn with inset shadows. */
+tr.amv-hl td { color: var(--accent); background: var(--accent-bg); box-shadow: inset 0 2.5px var(--accent), inset 0 -2.5px var(--accent); }
+tr.amv-hl td:first-child { box-shadow: inset 2.5px 0 var(--accent), inset 0 2.5px var(--accent), inset 0 -2.5px var(--accent); }
+tr.amv-hl td:last-child { box-shadow: inset -2.5px 0 var(--accent), inset 0 2.5px var(--accent), inset 0 -2.5px var(--accent); }
+tr.amv-hl td:only-child { box-shadow: inset 0 0 0 2.5px var(--accent); }
 
 /* ── Playback controls (not part of the frame) ── */
 .amv-bigplay {
@@ -519,6 +524,9 @@ html[data-export] .amv-stage { left: 0; top: 0; transform: none !important; }
   for (const sc of scenes) {
     const fit = sc.querySelector('.amv-fit');
     if (!fit || !fit.children.length) continue;
+    // max-width keeps prose readable, but a diagram can be wider and overflow it.
+    // Widen the box to the diagram so the scale and the centering cover the whole figure.
+    if (fit.scrollWidth > fit.offsetWidth) fit.style.maxWidth = \`\${fit.scrollWidth}px\`;
     const s = Math.min(1600 / fit.offsetWidth, 740 / fit.offsetHeight, 3.4);
     fit.style.transform = \`scale(\${s})\`;
   }

@@ -21,6 +21,9 @@
   for (const sc of scenes) {
     const fit = sc.querySelector('.amv-fit');
     if (!fit || !fit.children.length) continue;
+    // max-width keeps prose readable, but a diagram can be wider and overflow it.
+    // Widen the box to the diagram so the scale and the centering cover the whole figure.
+    if (fit.scrollWidth > fit.offsetWidth) fit.style.maxWidth = `${fit.scrollWidth}px`;
     const s = Math.min(1600 / fit.offsetWidth, 740 / fit.offsetHeight, 3.4);
     fit.style.transform = `scale(${s})`;
   }
