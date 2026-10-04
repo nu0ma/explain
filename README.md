@@ -15,10 +15,10 @@ A CLI that turns a Markdown script into a self-contained, single-file explainer 
 pnpm install
 pnpm add --global "$PWD"      # installs the explain command (or run node bin/explain.js)
 
-explain render examples/pr-before-after.md          # build an explainer page and open it in the browser
-explain render examples/pr-before-after.md --static # build HTML without <script>
-explain render examples/pr-before-after.md --watch  # serve the page and rebuild/reload on every save
-explain lint   examples/pr-before-after.md          # run the STE check only
+explain render script.md                            # build an explainer page and open it in the browser
+explain render script.md --static                   # build HTML without <script>
+explain render script.md --watch                    # serve the page and rebuild/reload on every save
+explain lint   script.md                            # run the STE check only
 explain video  script.md                            # build a video player page (add --mp4 for an MP4 file)
 explain help format                                 # script format
 explain list                                        # list components and themes

@@ -14,8 +14,8 @@ function files(dir) {
   });
 }
 
-test('ソース・テスト・スクリプト・例・README に簡体字の文が残っていない', () => {
-  const targets = ['src', 'bin', 'scripts', 'test', 'examples'].flatMap((d) => files(join(ROOT, d))).concat(join(ROOT, 'README.md'));
+test('ソース・テスト・スクリプト・README に簡体字の文が残っていない', () => {
+  const targets = ['src', 'bin', 'scripts', 'test'].flatMap((d) => files(join(ROOT, d))).concat(join(ROOT, 'README.md'));
   const found = targets.flatMap((file) => findSimplified(readFileSync(file, 'utf8')).map(({ line, text }) => `${relative(ROOT, file)}:${line}: ${text}`));
   assert.deepEqual(found, []);
 });

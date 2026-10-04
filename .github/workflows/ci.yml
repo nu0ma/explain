@@ -20,9 +20,3 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm test
-      - name: Render examples
-        run: |
-          for f in examples/*.md; do
-            node dist/explain.mjs render "$f" --no-open -o "out/$(basename "$f" .md).html"
-            node dist/explain.mjs render "$f" --no-open --static -o "out/$(basename "$f" .md).static.html"
-          done
