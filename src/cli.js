@@ -2,7 +2,7 @@
 // main() は入出力ストリームと環境変数を受け取れるので、テストから差し替えられる。
 
 import { parseArgs } from 'node:util';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { VERSION } from './assets.js';
 import { join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ import { THEMES } from './themes/index.js';
 import { renderVideo } from './video/render.js';
 import { serveWatch } from './watch.js';
 import { fileStamp, clock } from './time.js';
-import { pickProvider, compressAudio, TtsError, VOICES } from './video/tts.js';
+import { pickProvider, compressAudio, cacheStats, CACHE_MAX_BYTES, TtsError, VOICES } from './video/tts.js';
 import { exportMp4, ExportError } from './video/export.js';
 import { explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from './config.js';
 
@@ -32,6 +32,7 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
   explain lint   <file|->  [--style off|80|strict]   STE 検査だけする
   explain config [set <キー> <値> | get <キー> | reset [キー]]
                                                      設定を表示・変更する
+  explain cache [clear]                              音声のキャッシュの場所と大きさを表示する。clear で消す
   explain list                                       テンプレート・テーマ・部品の一覧
   explain help [部品名|format|video]                 部品の書き方・原稿の書式
 
@@ -152,6 +153,7 @@ export async function main(argv, io = {}) {
       return withSource(arg, io, fail, (src) => cmdVideo(src, opts, { print, fail, env, cwd: io.cwd, provider: io.ttsProvider, encodeAudio: io.encodeAudio }));
     case 'lint': return withSource(arg, io, fail, (src) => cmdLint(src, opts, { print, fail }));
     case 'config': return cmdConfig([arg, ...rest].filter((x) => x !== undefined), { print, fail, env });
+    case 'cache': return cmdCache(arg, { print, fail, env });
     case 'list': return cmdList(print), 0;
     case 'help': return cmdHelp(arg, { print, fail });
     default:
@@ -285,7 +287,7 @@ async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, 
     const provider = injected !== undefined ? injected : pickProvider(voice, env);
     result = await renderVideo(src, {
       provider,
-      cacheDir: join(explainHome(env), 'cache', 'tts'),
+      cacheDir: ttsCacheDir(env),
       defaults: { style: config.values.style, theme: config.values.theme, mode: config.values.mode },
       overrides: { style: opts.style, theme: opts.theme, mode: opts.mode },
       onProgress: (msg) => fail(`  ${msg}`),
@@ -400,6 +402,27 @@ function cmdConfig(args, { print, fail, env }) {
   }
   if (env.EXPLAIN_NO_OPEN && env.EXPLAIN_NO_OPEN !== '0') print('注意：環境変数 EXPLAIN_NO_OPEN が有効なため、open の設定より優先されます。');
   print('* はあなたが変更した値です。変更：explain config set <キー> <値>　既定値に戻す：explain config reset [キー]');
+  return 0;
+}
+
+const ttsCacheDir = (env) => join(explainHome(env), 'cache', 'tts');
+const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+function cmdCache(action, { print, fail, env }) {
+  const dir = ttsCacheDir(env);
+  const { files, bytes } = cacheStats(dir);
+  if (action === 'clear') {
+    rmSync(dir, { recursive: true, force: true });
+    print(`✓ 音声のキャッシュを消しました（${files.length} 件、${mb(bytes)}）`);
+    return 0;
+  }
+  if (action !== undefined) {
+    fail(`✗ "${action}" という操作はありません。使い方：explain cache [clear]`);
+    return 2;
+  }
+  print(`音声のキャッシュ：${dir}`);
+  print(`  ${files.length} 件、${mb(bytes)}（上限 ${mb(CACHE_MAX_BYTES)}。超えたら最後に使った時刻が古いものから消す）`);
+  print('消す：explain cache clear');
   return 0;
 }
 

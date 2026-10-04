@@ -1,12 +1,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable, Writable } from 'node:stream';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.js';
 import { renderVideo, captionHtml, videoMode, VIDEO_UI } from '../src/video/render.js';
-import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, compressAudio, hasCommand, TtsError, SAMPLE_RATE } from '../src/video/tts.js';
+import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, compressAudio, hasCommand, cacheStats, pruneCache, TtsError, SAMPLE_RATE } from '../src/video/tts.js';
 import { findChrome } from '../src/video/export.js';
 import { renderDoc } from '../src/render.js';
 import { ParseError } from '../src/parse.js';
@@ -324,4 +324,40 @@ test('cli video: 圧縮した音声を埋め込む', async () => {
   const r = await run(['video', '-', '-o', 'v-aac.html'], { stdin: SRC, ttsProvider: fakeProvider(), encodeAudio: async () => ({ mime: 'audio/mp4', data: Buffer.from('m4a') }) });
   assert.equal(r.code, 0, r.err);
   assert.match(readFileSync(join(dir, 'v-aac.html'), 'utf8'), /data:audio\/mp4;base64,/);
+});
+
+test('pruneCache: 上限を超えたら最後に使った時刻が古いものから消す。キャッシュを使うと時刻を更新する', async () => {
+  const cache = mkdtempSync(join(dir, 'cache-'));
+  const p = fakeProvider();
+  await synthAll(['一', '二', '三'], p, { cacheDir: cache });
+  const files = cacheStats(cache).files;
+  assert.equal(files.length, 3);
+  const old = new Date(Date.now() - 60_000);
+  for (const f of files) utimesSync(f.path, old, old);
+  await synthAll(['一'], p, { cacheDir: cache }); // 「一」を使い直して新しくする
+  const size = files[0].size;
+  const cases = [
+    { name: '上限内', max: size * 3, wantRemoved: 0, wantLeft: 3 },
+    { name: '1 件ぶん超える', max: size * 2, wantRemoved: 1, wantLeft: 2 },
+    { name: '使い直したものは残る', max: size, wantRemoved: 1, wantLeft: 1 },
+  ];
+  for (const { name, max, wantRemoved, wantLeft } of cases) {
+    assert.equal(pruneCache(cache, max), wantRemoved, name);
+    assert.equal(cacheStats(cache).files.length, wantLeft, name);
+  }
+  assert.equal(p.calls.length, 3, '「一」はキャッシュから読む');
+  const again = fakeProvider();
+  await synthAll(['一'], again, { cacheDir: cache });
+  assert.equal(again.calls.length, 0, '最後に使った「一」が残っている');
+});
+
+test('cli cache: 場所と大きさを出し、clear で消す。知らない操作は 2', async () => {
+  await run(['video', '-', '-o', 'v-cache.html'], { stdin: SRC, ttsProvider: fakeProvider() });
+  const show = await run(['cache']);
+  assert.equal(show.code, 0);
+  assert.match(show.out, /音声のキャッシュ：.+cache\/tts\n {2}\d+ 件、[\d.]+ MB（上限 200\.0 MB/);
+  const clear = await run(['cache', 'clear']);
+  assert.match(clear.out, /✓ 音声のキャッシュを消しました/);
+  assert.match((await run(['cache'])).out, / {2}0 件、0\.0 MB/);
+  assert.equal((await run(['cache', 'drop'])).code, 2);
 });

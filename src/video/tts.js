@@ -2,11 +2,13 @@
 // 1 文ごとの合成結果は 22050 Hz・モノラル・16 ビット PCM。文と声の組で EXPLAIN_HOME/cache/tts/ にキャッシュし、再描画では合成し直さない。
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, readdirSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const SAMPLE_RATE = 22050;
+// キャッシュの上限。22050 Hz・16 ビットで約 75 分ぶん。超えたら最後に使った時刻が古いものから消す。
+export const CACHE_MAX_BYTES = 200 * 1024 * 1024;
 export const VOICES = ['auto', 'elevenlabs', 'system', 'off'];
 const ELEVEN_DEFAULT_VOICE = 'JBFqnCBsd6RMkjVDRZzb';
 const ELEVEN_MODEL = 'eleven_multilingual_v2';
@@ -169,6 +171,8 @@ export async function synthAll(texts, provider, { cacheDir } = {}) {
       const file = cacheDir && join(cacheDir, `${createHash('sha1').update(`${provider.id}\n${texts[i]}`).digest('hex')}.pcm`);
       if (file && existsSync(file)) {
         const buf = readFileSync(file);
+        const now = new Date();
+        utimesSync(file, now, now); // 最後に使った時刻を残し、上限を超えたときに消す順を決める。
         results[i] = new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2).slice();
         continue;
       }
@@ -177,7 +181,35 @@ export async function synthAll(texts, provider, { cacheDir } = {}) {
     }
   };
   await Promise.all(Array.from({ length: Math.min(provider.concurrency ?? 2, texts.length) }, worker));
+  if (cacheDir) pruneCache(cacheDir);
   return results;
+}
+
+// キャッシュの音声ファイルの一覧（古い順）と合計のバイト数。
+export function cacheStats(cacheDir) {
+  if (!existsSync(cacheDir)) return { files: [], bytes: 0 };
+  const files = readdirSync(cacheDir)
+    .filter((name) => name.endsWith('.pcm'))
+    .map((name) => {
+      const path = join(cacheDir, name);
+      const st = statSync(path);
+      return { path, size: st.size, mtime: st.mtimeMs };
+    })
+    .sort((a, b) => a.mtime - b.mtime);
+  return { files, bytes: files.reduce((n, f) => n + f.size, 0) };
+}
+
+// 合計が maxBytes を超えていたら、最後に使った時刻が古いものから消す。消したファイルの数を返す。
+export function pruneCache(cacheDir, maxBytes = CACHE_MAX_BYTES) {
+  let { files, bytes } = cacheStats(cacheDir);
+  let removed = 0;
+  for (const f of files) {
+    if (bytes <= maxBytes) break;
+    rmSync(f.path, { force: true });
+    bytes -= f.size;
+    removed++;
+  }
+  return removed;
 }
 
 // 前後の無音を削り、画面のテンポを実際の音声だけで決める。

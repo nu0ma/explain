@@ -23,6 +23,7 @@ explain video  script.md --voice system             # build a video player page 
 explain help format                                 # script format
 explain list                                        # list components and themes
 explain config                                      # show and change settings
+explain cache [clear]                               # show (or clear) the narration audio cache
 ```
 
 - Output goes to `~/.explain-cli/pages/` and `~/.explain-cli/videos/`; settings live in `~/.explain-cli/config.json`. Set `EXPLAIN_HOME` to change the location.
