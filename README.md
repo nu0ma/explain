@@ -93,7 +93,6 @@ claude plugin eval . --judge-model sonnet --allow-tools 'Bash(node:*)' Write --t
 - Cases in `quality` grade the script the agent wrote; `trigger` and `quiet` check that the skill loads only when it should; `args` checks `/explain config`.
 - The default judge (haiku) fails good video scripts too often, so pass `--judge-model sonnet`.
 - The eval sandbox cannot start Chrome or macOS `say`, so `--png` falls back to no image and videos get subtitles only. The graders read the script and the CLI report, not the images.
-- If `node` on your `PATH` is not Node 24.21 or later, also allow the absolute path of a suitable `node`, for example `--allow-tools "Bash($(mise which node):*)"`.
 
 Each case runs 3 times with the plugin and 3 times without it by default, and every run uses model credit, so the suite runs locally and not in CI.
 
