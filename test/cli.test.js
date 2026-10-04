@@ -4,6 +4,7 @@ import { Readable, Writable } from 'node:stream';
 import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { get } from 'node:http';
 import { main, shouldOpen } from '../src/cli.js';
 import { findSimplified } from './helpers/chinese.js';
 
@@ -220,6 +221,17 @@ test('cli render --watch: 配信し、保存すると作り直して再読み込
     assert.match(first, /<h1>CLI テスト<\/h1>/);
     assert.match(first, /new EventSource\('\/__explain\/events'\)/);
     assert.doesNotMatch(readFileSync(outFile, 'utf8'), /EventSource/, '-o のファイルには再読み込みのスクリプトを入れない');
+    const hosts = [
+      { host: new URL(url).host, wantCode: 200 },
+      { host: `localhost:${new URL(url).port}`, wantCode: 200 },
+      { host: `evil.example:${new URL(url).port}`, wantCode: 403 },
+    ];
+    for (const { host, wantCode } of hosts) {
+      const code = await new Promise((resolve, reject) => {
+        get(url, { headers: { host } }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject);
+      });
+      assert.equal(code, wantCode, host);
+    }
 
     const events = await fetch(`${url}__explain/events`);
     const reader = events.body.getReader();

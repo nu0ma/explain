@@ -11,12 +11,18 @@ const DEBOUNCE_MS = 80;
 
 // build() は HTML を返す。作れなかったときは null を返す（エラーの表示は build() の役目）。
 // signal が中断されるまで動き続ける。onListen(url) はサーバーが待ち受けを始めたら呼ばれる。
-export function serveWatch(file, build, { signal, onListen, onRebuild = () => {} }) {
+export function serveWatch(file, build, { signal, onListen }) {
   return new Promise((resolve, reject) => {
     let html = build() ?? '<!doctype html><meta charset="utf-8"><p>原稿にエラーがあります。ターミナルを確認してください。</p>';
     const clients = new Set();
 
     const server = createServer((req, res) => {
+      // DNS リバインディングで外部のサイトから読まれないよう、ローカルの名前で来た要求だけに応える。
+      const { port } = server.address();
+      if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host)) {
+        res.writeHead(403).end();
+        return;
+      }
       if (req.url === EVENTS) {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
         res.write(': connected\n\n');
@@ -43,7 +49,6 @@ export function serveWatch(file, build, { signal, onListen, onRebuild = () => {}
         if (next === null) return;
         html = next;
         for (const res of clients) res.write('data: reload\n\n');
-        onRebuild();
       }, DEBOUNCE_MS);
     });
 
