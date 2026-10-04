@@ -1,6 +1,17 @@
 # explain
 
-A Claude Code plugin and CLI that turn a Markdown script into a self-contained, single-file explainer HTML page and a 3Blue1Brown-style explainer video. It is a personal tool rebuilt for one engineer who works in Japanese, so both the generated output and the CLI messages are Japanese only.
+A Claude Code plugin that lets the agent explain things as a self-contained, single-file explainer HTML page or a 3Blue1Brown-style explainer video. Ask "図にして" or "動画で説明して", and the agent writes a Markdown script, renders it with the bundled CLI, and fixes the reported warnings. The CLI also works on its own.
+
+It is a personal tool rebuilt for one engineer who works in Japanese, so both the generated output and the CLI messages are Japanese only.
+
+## Install as a Claude Code plugin
+
+```sh
+/plugin marketplace add nu0ma/explain
+/plugin install explain@explain
+```
+
+The plugin ships the `explain` skill and a single-file build of the CLI (`skills/explain/scripts/explain.mjs`), so it needs only Node 24.21 or later. Besides asking in words, you can type `/explain`. `/explain:config` and `/explain:cache` show or change the settings and the narration cache.
 
 ## Demo
 
@@ -24,15 +35,6 @@ Built from [transactional-outbox.video.md](docs/demo/transactional-outbox.video.
 - Lays out diagrams (flow / sequence / tree, etc.) automatically: you only write the relationships.
 - Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
 - With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript.
-
-## Install as a Claude Code plugin
-
-```sh
-/plugin marketplace add nu0ma/explain
-/plugin install explain@explain
-```
-
-The plugin ships the `explain` skill and a single-file build of the CLI (`skills/explain/scripts/explain.mjs`), so it needs only Node 24.21 or later. Ask the agent to explain something visually ("図にして", "動画で説明して"), or type `/explain`. The agent writes the script, renders it, and fixes the reported warnings. `/explain:config` and `/explain:cache` show or change the settings and the narration cache.
 
 ## Use the CLI directly
 
