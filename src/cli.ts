@@ -413,7 +413,7 @@ async function cmdVideo(
   let result: Awaited<ReturnType<typeof renderVideo>>;
   let voiceName: string;
   try {
-    const provider = injected !== undefined ? injected : pickProvider(voice);
+    const provider = injected !== undefined ? injected : pickProvider(voice, { voiceFile: join(ttsCacheDir(env), 'voice.json') });
     result = await renderVideo(src, {
       provider,
       cacheDir: ttsCacheDir(env),

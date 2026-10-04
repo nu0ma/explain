@@ -367,6 +367,23 @@
     fps: D.fps,
     // When each step appears, for checking the timing from outside the page.
     steps: () => items.map((it) => ({ scene: it.scene, at: it.at })),
+    // The time ranges [from, to] in which render(t) can draw a different frame. Outside them the frame stays the same
+    // until the next range starts; at `to` the final state is already reached (an instant change is a range with from === to).
+    // The export uses this to skip screenshots, so every time-dependent change in render(t) must be listed here.
+    // The bounds use the same expressions as render(t), so the floating-point values match exactly.
+    keyframes() {
+      const out = [[0, 0.8]];
+      segs.forEach((seg, i) => {
+        if (i > 0) out.push([seg.start, seg.start + T]);
+        for (const b of seg.beats) {
+          out.push([b.start, b.start + 0.2], [b.end + 0.3, b.end + 0.3]);
+        }
+      });
+      for (const it of items) out.push([it.at, it.at + R]);
+      for (const m of morphs) out.push([segs[m.scene].start, segs[m.scene].start + T]);
+      for (const e of camEvents) out.push([e.t, e.t + CAM]);
+      return out;
+    },
     exportMode() {
       root.setAttribute('data-export', '');
       // Pin auto to light so the output does not depend on the exporting machine's color scheme.

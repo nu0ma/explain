@@ -4,8 +4,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, readdirSync, statSync, utimesSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { availableParallelism, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 export const SAMPLE_RATE = 22050;
 // Cache size limit: about 75 minutes at 22050 Hz 16-bit. Above it, the least recently used files are removed.
@@ -18,6 +18,8 @@ export interface TtsProvider {
   id: string;
   concurrency?: number;
   synth: (text: string) => Promise<Int16Array>;
+  // Checks the installed voices again before new audio is synthesized. It may change id.
+  refresh?: () => void;
 }
 
 export interface EncodedAudio {
@@ -45,19 +47,46 @@ export class TtsError extends Error {
 }
 
 // Picks the voice to use. Returns a provider, or null for captions only.
+// Listing the voices (say -v '?') takes almost a second, so the choice is kept in voiceFile.
+// The kept voice only names cached audio. Before any new audio is synthesized, synthAll calls refresh(), which lists the voices again,
+// so a voice installed or removed since then is picked up before say runs.
 export function pickProvider(
   choice: string,
-  { platform = process.platform, which = hasCommand }: { platform?: NodeJS.Platform; which?: (cmd: string) => boolean } = {},
+  { platform = process.platform, which = hasCommand, voiceFile, listVoice = macVoice }: {
+    platform?: NodeJS.Platform;
+    which?: (cmd: string) => boolean;
+    voiceFile?: string;
+    listVoice?: () => string | undefined;
+  } = {},
 ): TtsProvider | null {
   if (choice === 'off') return null;
   if (platform !== 'darwin' || !which('say')) {
     throw new TtsError('ナレーションの音声にはmacOSのsayが必要です');
   }
-  const voice = macVoice();
+  let voice: string | undefined;
+  let listed = false;
+  const refresh = () => {
+    if (listed) return;
+    listed = true;
+    voice = listVoice();
+    if (voiceFile) {
+      try {
+        mkdirSync(dirname(voiceFile), { recursive: true });
+        writeFileSync(voiceFile, `${JSON.stringify({ voice: voice ?? null })}\n`);
+      } catch {
+        // Without the file, the next run lists the voices again.
+      }
+    }
+  };
+  const kept = voiceFile ? readKeptVoice(voiceFile) : null;
+  if (kept) voice = kept.voice;
+  else refresh();
   return {
     name: 'say',
-    id: `say:${voice ?? 'default'}`,
-    concurrency: 4,
+    get id() { return `say:${voice ?? 'default'}`; },
+    // The speech service serializes much of the work, but more processes still help: 16 lines took 6.8 s with 4 and 5.5 s with 8.
+    concurrency: Math.min(8, availableParallelism()),
+    refresh,
     // Pass the text through a file, not an argument, so say does not parse text starting with "-" as an option.
     synth: (text) => withTemp(async (file) => {
       const input = file.replace(/\.wav$/, '.txt');
@@ -66,6 +95,18 @@ export function pickProvider(
       return readWav(readFileSync(file));
     }),
   };
+}
+
+// Reads the voice kept by pickProvider. Returns null when the file is missing or broken; voice is undefined for the OS default voice.
+function readKeptVoice(file: string): { voice: string | undefined } | null {
+  try {
+    const data: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (typeof data !== 'object' || data === null || !('voice' in data)) return null;
+    if (data.voice === null) return { voice: undefined };
+    return typeof data.voice === 'string' ? { voice: data.voice } : null;
+  } catch {
+    return null;
+  }
 }
 
 // Picks a Japanese macOS voice, searching ja_JP voices in MAC_JA_VOICES order.
@@ -146,16 +187,19 @@ function resample(input: Int16Array | { rate: number; samples: Int16Array }): In
 // Synthesizes all narration, with caching and a concurrency limit. Returns one Int16Array per text.
 export async function synthAll(
   texts: readonly string[],
-  provider: Pick<TtsProvider, 'id' | 'concurrency' | 'synth'>,
+  provider: Pick<TtsProvider, 'id' | 'concurrency' | 'synth' | 'refresh'>,
   { cacheDir }: { cacheDir?: string } = {},
 ): Promise<Int16Array[]> {
   if (cacheDir) mkdirSync(cacheDir, { recursive: true });
+  const cacheFile = (text: string) => cacheDir && join(cacheDir, `${createHash('sha1').update(`${provider.id}\n${text}`).digest('hex')}.pcm`);
+  // Something needs synthesis, so let the provider check its voice first. The cache keys use the id after that.
+  if (provider.refresh && texts.some((t) => { const f = cacheFile(t); return !f || !existsSync(f); })) provider.refresh();
   const results: Int16Array[] = [];
   let next = 0;
   const worker = async () => {
     while (next < texts.length) {
       const i = next++;
-      const file = cacheDir && join(cacheDir, `${createHash('sha1').update(`${provider.id}\n${texts[i]}`).digest('hex')}.pcm`);
+      const file = cacheFile(texts[i]);
       if (file && existsSync(file)) {
         const buf = readFileSync(file);
         const now = new Date();

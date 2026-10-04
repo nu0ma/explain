@@ -58,6 +58,23 @@ export interface ExportOptions {
 interface PlayerInfo {
   duration: number;
   fps: number;
+  // Time ranges in which the frame can change (window.__amv.keyframes()). Without them, every frame is captured.
+  keyframes?: [number, number][];
+}
+
+// Slack for floating-point rounding at the range bounds. Far smaller than one frame, so it adds a frame only at an exact bound.
+const KEYFRAME_EPS = 1e-6;
+
+// The frames that need a screenshot: frame 0, and each frame i whose time span (t(i-1), t(i)] touches a change range.
+// This includes the first frame after each range ends, which shows the final state. Every other frame equals the frame before it.
+export function changedFrames(keyframes: [number, number][] | undefined, frames: number, fps: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < frames; i++) {
+    const t = i / fps;
+    const prev = (i - 1) / fps;
+    if (!keyframes || i === 0 || keyframes.some(([from, to]) => t >= from - KEYFRAME_EPS && prev < to + KEYFRAME_EPS)) out.push(i);
+  }
+  return out;
 }
 
 // Parameters and results of the CDP commands this module sends.
@@ -66,7 +83,7 @@ interface CdpCommands {
   'Page.enable': { params: Record<string, never>; result: unknown };
   'Page.navigate': { params: { url: string }; result: unknown };
   'Page.captureScreenshot': {
-    params: { format: 'jpeg' | 'png'; quality?: number; captureBeyondViewport?: boolean; clip: { x: number; y: number; width: number; height: number; scale: number } };
+    params: { format: 'jpeg' | 'png'; quality?: number; optimizeForSpeed?: boolean; captureBeyondViewport?: boolean; clip: { x: number; y: number; width: number; height: number; scale: number } };
     result: { data: string };
   };
   'Runtime.evaluate': {
@@ -146,7 +163,7 @@ export async function exportMp4(
       launched.push(await launch(chromePath, join(tmp, `profile-${i}`)));
     }));
     const pages = await Promise.all(Array.from({ length: tabs }, (_, i) => openPage(launched[i % launched.length].cdp, htmlFile)));
-    const infos = await Promise.all(pages.map((p) => p.evaluate('document.fonts.ready.then(() => { window.__amv.exportMode(); return { duration: window.__amv.duration, fps: window.__amv.fps }; })')));
+    const infos = await Promise.all(pages.map((p) => p.evaluate('document.fonts.ready.then(() => { window.__amv.exportMode(); return { duration: window.__amv.duration, fps: window.__amv.fps, keyframes: window.__amv.keyframes() }; })')));
     // The expression above returns this shape from the player page.
     const info = infos[0] as PlayerInfo;
 
@@ -175,17 +192,44 @@ export async function exportMp4(
       const { data } = await p.send('Page.captureScreenshot', { format: 'jpeg', quality: 92, clip: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 } });
       return Buffer.from(data, 'base64');
     };
-    // Capture one frame per tab at a time and pass them to ffmpeg in frame order. Small batches keep buffered frames in memory low.
+    // Only frames that can change are captured; each screenshot is sent again for the unchanged frames that follow it.
+    // Each tab takes the next screenshot as soon as it is free. Finished screenshots wait in `ready` until the ones
+    // before them are written, so ffmpeg gets frames in order. A tab stops `ahead` screenshots past the oldest unwritten one,
+    // which keeps buffered frames in memory low.
+    const shots = changedFrames(info.keyframes, frames, info.fps);
+    const ahead = pages.length * 2;
+    const ready = new Map<number, Buffer>();
+    const waiting: (() => void)[] = [];
+    let next = 0;
+    let written = 0;
     let reported = -1;
-    for (let i = 0; i < frames; i += pages.length) {
-      const batch = await Promise.all(pages.slice(0, frames - i).map((p, k) => capture(p, i + k)));
-      for (const buf of batch) await write(buf);
-      const n = i + batch.length;
-      if (Math.floor((n - 1) / 30) > reported || n === frames) {
-        reported = Math.floor((n - 1) / 30);
-        onProgress(n, frames);
+    const drain = async () => {
+      while (ready.has(written)) {
+        const buf = ready.get(written) as Buffer;
+        ready.delete(written);
+        const n = shots[written + 1] ?? frames;
+        for (let f = shots[written]; f < n; f++) await write(buf);
+        written++;
+        for (const wake of waiting.splice(0)) wake();
+        if (Math.floor((n - 1) / 30) > reported || n === frames) {
+          reported = Math.floor((n - 1) / 30);
+          onProgress(n, frames);
+        }
       }
-    }
+    };
+    let writing = Promise.resolve();
+    const worker = async (page: Page) => {
+      while (next < shots.length) {
+        const j = next++;
+        // done settles only when ffmpeg exits, so a failed ffmpeg also ends the wait.
+        while (j >= written + ahead) await Promise.race([new Promise<void>((r) => waiting.push(r)), done]);
+        ready.set(j, await capture(page, shots[j]));
+        writing = writing.then(drain);
+        writing.catch(() => {}); // Rejections are rethrown by the await below.
+      }
+    };
+    await Promise.all(pages.map(worker));
+    await writing;
     proc.stdin.end();
     await done;
     encoded = true;
