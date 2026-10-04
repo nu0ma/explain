@@ -1,15 +1,14 @@
-// Flow / architecture diagram: the script states only relations (A -> B: label). dagre computes coordinates; this module draws the result as SVG.
-import dagre from '@dagrejs/dagre';
-import type { EdgeLabel, Graph, GraphLabel, NodeLabel } from '@dagrejs/dagre';
+// Flow / architecture diagram: the script states only relations (A -> B: label). the layered layout in ../svg/layout.ts computes coordinates; this module draws the result as SVG.
 import { esc, measure, wrap } from '../svg/text.ts';
 import { f, smoothPath, arrowDefs, svgOpen, textLines } from '../svg/shapes.ts';
 import type { Point } from '../svg/shapes.ts';
+import { layoutGraph } from '../svg/layout.ts';
+import type { Box, Rankdir } from '../svg/layout.ts';
 import { ComponentError, contentLines } from './error.ts';
 import type { Component } from './types.ts';
 
 export type FlowShape = 'db' | 'rect' | 'round' | 'diamond';
 export type FlowDiff = 'add' | 'chg' | 'del';
-type Rankdir = 'TB' | 'LR' | 'BT' | 'RL';
 
 export type FlowNode = {
   id: string;
@@ -28,14 +27,12 @@ export type FlowModel = { nodes: Map<string, FlowNode>; edges: FlowEdge[]; group
 type NodeSpec = Omit<FlowNode, 'line'> & { labelDeclared: boolean };
 type ChainStep = { arrow: string | null; nodes: NodeSpec[] };
 type NodeSize = { lines: string[]; width: number; height: number };
-type Box = { x: number; y: number; width: number; height: number };
-// Cluster nodes have no size until dagre computes it, so width and height are optional.
-type LayoutGraph = Graph<GraphLabel, Partial<NodeLabel>, EdgeLabel>;
 
 const FS = 13;
 const LH = 17;
 const TEXT_MAX = 150;
 const EDGE_FS = 11.5;
+const CLUSTER_FS = 11;
 const DIRS: ReadonlySet<string> = new Set<Rankdir>(['TB', 'LR', 'BT', 'RL']);
 const isRankdir = (dir: string): dir is Rankdir => DIRS.has(dir);
 
@@ -195,68 +192,56 @@ function nodeSize(node: FlowNode): NodeSize {
   return { lines, width: size[0], height: size[1] };
 }
 
-// dagre fills in these values during layout; a missing one means the layout did not run.
-function laidOut(v: number | undefined, what: string): number {
-  if (v === undefined) throw new Error(`dagre did not compute ${what}`);
-  return v;
-}
-
-function nodeBox(g: LayoutGraph, id: string): Box {
-  const n = g.node(id);
-  return { x: laidOut(n.x, `x of ${id}`), y: laidOut(n.y, `y of ${id}`), width: laidOut(n.width, `width of ${id}`), height: laidOut(n.height, `height of ${id}`) };
-}
-
 function layout({ nodes, edges, groups }: FlowModel, rankdir: Rankdir, id: string): string {
-  const g: LayoutGraph = new dagre.graphlib.Graph<GraphLabel, Partial<NodeLabel>, EdgeLabel>({ compound: groups.length > 0, multigraph: true });
-  g.setGraph({ rankdir, nodesep: 36, ranksep: 46, marginx: 14, marginy: groups.length ? 26 : 14 });
-  g.setDefaultEdgeLabel(() => ({}));
   const sized = [...nodes.values()].map((n) => ({ n, size: nodeSize(n) }));
-  for (const { n, size } of sized) g.setNode(n.id, { width: size.width, height: size.height });
-  const groupIds = groups.map((grp, i) => {
-    let key = `__group${i}`;
-    while (g.hasNode(key)) key += '_';
-    g.setNode(key, { label: grp.name });
-    grp.members.forEach((m) => g.setParent(m, key));
-    return key;
+  // A node listed in several groups belongs to the last one.
+  const groupOf = new Map<string, number>();
+  groups.forEach((grp, i) => grp.members.forEach((m) => groupOf.set(m, i)));
+  const g = layoutGraph({
+    rankdir,
+    nodesep: 36,
+    ranksep: 46,
+    edgesep: 12,
+    margin: 14,
+    clusterPad: { top: 26, right: 12, bottom: 12, left: 12 },
+    nodes: sized.map(({ n, size }) => ({ id: n.id, width: size.width, height: size.height, cluster: groupOf.has(n.id) ? String(groupOf.get(n.id)) : undefined })),
+    clusters: groups.map((grp, i) => ({ id: String(i), minWidth: measure(grp.name, CLUSTER_FS, { mono: true }) + 16 })),
+    edges: edges.map((e) => ({ from: e.from, to: e.to, label: e.label ? { width: measure(e.label, EDGE_FS) + 12, height: 18 } : undefined })),
   });
-  edges.forEach((e, i) => {
-    const label: EdgeLabel = e.label ? { label: e.label, width: measure(e.label, EDGE_FS) + 12, height: 18, labelpos: 'c' } : {};
-    g.setEdge(e.from, e.to, label, `e${i}`);
-  });
-  dagre.layout(g);
+  const boxOf = (key: string): Box => {
+    const b = g.nodes.get(key);
+    if (!b) throw new Error(`layout did not place node ${key}`);
+    return b;
+  };
 
-  const clusters = groups.map((grp, i) => {
-    const c = nodeBox(g, groupIds[i]);
+  const clusters = groups.flatMap((grp, i) => {
+    const c = g.clusters.get(String(i));
+    if (!c) return [];
     const x = c.x - c.width / 2;
     const y = c.y - c.height / 2;
-    return `<rect class="am-cluster" x="${f(x)}" y="${f(y)}" width="${f(c.width)}" height="${f(c.height)}" rx="4"/><text class="am-cluster-label" x="${f(x + 8)}" y="${f(y + 14)}">${esc(grp.name)}</text>`;
+    return [`<rect class="am-cluster" x="${f(x)}" y="${f(y)}" width="${f(c.width)}" height="${f(c.height)}" rx="4"/><text class="am-cluster-label" x="${f(x + 8)}" y="${f(y + 14)}">${esc(grp.name)}</text>`];
   });
 
   // In video, elements appear one source line at a time. Arrows on a line and nodes first seen on that line share a step.
   const stepOf = new Map([...new Set([...[...nodes.values()].map((n) => n.line), ...edges.map((e) => e.line)])].sort((a, b) => a - b).map((l, k) => [l, k]));
   const edgeSvg = edges.map((e, i) => {
-    const data = g.edge({ v: e.from, w: e.to, name: `e${i}` });
-    if (!data.points) throw new Error(`dagre did not compute points of edge ${e.from} -> ${e.to}`);
-    const pts = clipEnds(data.points, nodeBox(g, e.from), nodes.get(e.from)?.shape, nodeBox(g, e.to), nodes.get(e.to)?.shape);
+    const data = g.edges[i];
+    const pts = clipEnds(data.points, boxOf(e.from), nodes.get(e.from)?.shape, boxOf(e.to), nodes.get(e.to)?.shape);
     const path = `<path class="am-edge${e.dashed ? ' am-edge--dashed' : ''}${e.diff ? ` am-edge--${e.diff}` : ''}" d="${smoothPath(pts)}" marker-end="url(#${id}-arrow${e.diff ? `-${e.diff}` : ''})"/>`;
-    if (!e.label) return `<g data-step="${stepOf.get(e.line)}">${path}</g>`;
+    if (!e.label || !data.label) return `<g data-step="${stepOf.get(e.line)}">${path}</g>`;
     const w = measure(e.label, EDGE_FS) + 10;
-    const lx = laidOut(data.x, `label x of edge ${e.from} -> ${e.to}`);
-    const ly = laidOut(data.y, `label y of edge ${e.from} -> ${e.to}`);
+    const { x: lx, y: ly } = data.label;
     return `<g data-step="${stepOf.get(e.line)}">${path}<g class="am-edge-label"><rect x="${f(lx - w / 2)}" y="${f(ly - 9)}" width="${f(w)}" height="18" rx="3"/>${textLines([e.label], lx, ly, LH)}</g></g>`;
   });
 
   const nodeSvg = sized.map(({ n, size }) => {
-    const { x, y } = nodeBox(g, n.id);
+    const { x, y } = boxOf(n.id);
     const { width: w, height: h, lines } = size;
     return `<g class="am-node am-node--${n.shape}${n.hi ? ' am-node--hi' : ''}${n.diff ? ` am-node--${n.diff}` : ''}" data-key="${esc(n.id)}" data-step="${stepOf.get(n.line)}">${shapeSvg(n.shape, x, y, w, h)}${textLines(lines, x, y + (n.shape === 'db' ? 4 : 0), LH)}</g>`;
   });
 
-  const graph = g.graph();
-  const width = laidOut(graph.width, 'graph width');
-  const height = laidOut(graph.height, 'graph height');
   const label = `フロー図：${[...nodes.values()].slice(0, 8).map((n) => n.label).join('、')}`;
-  return `${svgOpen(width, height, label)}${arrowDefs(id)}${diffArrowDefs(id, edges)}<g>${clusters.join('')}</g><g>${edgeSvg.join('')}</g><g>${nodeSvg.join('')}</g></svg>`;
+  return `${svgOpen(g.width, g.height, label)}${arrowDefs(id)}${diffArrowDefs(id, edges)}<g>${clusters.join('')}</g><g>${edgeSvg.join('')}</g><g>${nodeSvg.join('')}</g></svg>`;
 }
 
 function shapeSvg(shape: FlowShape, x: number, y: number, w: number, h: number): string {
@@ -273,7 +258,7 @@ function shapeSvg(shape: FlowShape, x: number, y: number, w: number, h: number):
   return `<rect class="am-node-shape" x="${f(l)}" y="${f(t)}" width="${f(w)}" height="${f(h)}" rx="${f(rx)}"/>`;
 }
 
-// dagre clips arrow ends at the bounding rectangle. For diamonds, recompute the intersection with the slanted edge, or the arrow floats in the air.
+// The layout ends arrows on the bounding rectangle. For diamonds, recompute the intersection with the slanted edge, or the arrow floats in the air.
 function clipEnds(points: readonly Point[], from: Box, fromShape: FlowShape | undefined, to: Box, toShape: FlowShape | undefined): Point[] {
   const pts = points.map((p) => ({ ...p }));
   if (fromShape === 'diamond' && pts.length > 1) pts[0] = diamondPoint(from, pts[1]);

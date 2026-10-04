@@ -1,5 +1,5 @@
 // render --png: opens the page in headless Chrome, checks the layout, and saves a full-page screenshot.
-// The checks run in the page, so they see the real fonts and the real layout that dagre and CSS produced.
+// The checks run in the page, so they see the real fonts and the real positions that the flow layout and CSS produced.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
