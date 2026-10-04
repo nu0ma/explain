@@ -21,8 +21,9 @@ whether the page is useful.
 
 - Put the conclusion first: in the lead or the first panel, as a `callout`.
   The panels after it give the evidence.
-- Plan 3 to 8 panels. Each panel answers one question, and its heading states the answer.
-  If you need more than 8, split the topic or cut panels.
+- Each panel answers one question, and its heading states the answer. Most topics need 3 to 8
+  panels. If the page grows well past that, check whether it is still one topic: split it, or cut
+  the panels that do not support the conclusion.
 - Leave out what does not help the reader understand the conclusion.
 - Do not invent data. Use real numbers from the input; if a number is only an example or your own
   calculation, say so. Without real numbers, do not use `limits`.
@@ -58,7 +59,9 @@ whether the page is useful.
 
 Make a video only when the user asks for one.
 
-- 3 to 6 scenes. Each scene has one component (or one table or list) on screen and 2 to 5 narration lines.
+- Each scene has one component (or one table or list) on screen and walks through it in a few
+  narration lines. Most topics need 3 to 6 scenes. Split a scene when it needs a second diagram or
+  more lines than the viewer can follow, and merge scenes that make the same point.
 - The N-th narration line reveals the N-th step, so the order of lines in a component is the order of the explanation.
 - Write narration as spoken Japanese, as if explaining to someone in front of you, not as manual text.
 - Use `[name]` in narration to point the camera at the element being described. To keep the viewer on one object across scenes, keep its name in the next scene.
