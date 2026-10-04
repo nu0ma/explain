@@ -218,3 +218,21 @@ test('flow: explicit IDs keep line-aware errors, escaped text, and collision-fre
   assert.match(svg, /&lt;API &amp; &quot;label&quot;&gt;/);
   assert.equal((svg.match(/class="am-cluster"/g) || []).length, 1);
 });
+
+test('parseFlow: 宣言したIDに @ を付けた参照はエラーにし、宣言していない @ の名前はそのまま使える', () => {
+  const cases = [
+    { name: '矢印の右', req: '@tabs[撮影するタブ] -> A\nB -> @tabs', wantErr: { line: 2, message: /@tabs は新しいノードになります.*tabs と書いて/ } },
+    { name: '矢印の左', req: '@db[(DB)]\n@db -> A', wantErr: { line: 2, message: /db と書いて/ } },
+    { name: '宣言より前', req: 'A -> @api\n@api[API]', wantErr: { line: 1, message: /api と書いて/ } },
+    { name: '宣言していない', req: '@mention -> A', wantErr: null },
+    { name: '括弧つきの別ノード', req: '@api[API]\n(@api) -> A', wantErr: null },
+  ];
+  for (const { name, req, wantErr } of cases) {
+    if (!wantErr) {
+      parseFlow(req);
+      continue;
+    }
+    throwsAt(() => parseFlow(req), wantErr.line);
+    assert.throws(() => parseFlow(req), wantErr.message, name);
+  }
+});

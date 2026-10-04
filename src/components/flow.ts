@@ -87,7 +87,9 @@ export function parseFlow(text: string): FlowModel {
   const nodes = new Map<string, FlowNode>();
   const edges: FlowEdge[] = [];
   const groups: FlowGroup[] = [];
+  const declared = new Set<string>();
   const upsert = ({ labelDeclared, ...spec }: NodeSpec, line: number): string => {
+    if (labelDeclared) declared.add(spec.id);
     const prev = nodes.get(spec.id);
     if (!prev) nodes.set(spec.id, { ...spec, line });
     else nodes.set(spec.id, { ...prev, label: labelDeclared ? spec.label : prev.label, shape: spec.explicit ? spec.shape : prev.shape, hi: prev.hi || spec.hi, diff: prev.diff || spec.diff });
@@ -113,6 +115,12 @@ export function parseFlow(text: string): FlowModel {
     }
   }
   if (!nodes.size) throw new ComponentError('flow にはノードが 1 つ以上必要です', 1);
+  // A bare "@id" naming a declared ID is almost always a reference written with the @ by mistake.
+  // Without this check it silently becomes a new node labeled "@id".
+  for (const node of nodes.values()) {
+    const ref = node.id.startsWith('@') && !node.explicit ? node.id.slice(1) : '';
+    if (ref && declared.has(ref)) throw new ComponentError(`flow の ${node.id} は新しいノードになります。宣言したIDを参照するときは @ を付けずに ${ref} と書いてください`, node.line);
+  }
   for (const grp of groups) {
     const missing = grp.members.filter((m) => !nodes.has(m));
     if (missing.length) throw new ComponentError(`group ${grp.name} が存在しないノードを参照しています：${missing.join('、')}`, grp.line);
