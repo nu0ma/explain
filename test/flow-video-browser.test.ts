@@ -61,6 +61,49 @@ test('e2e flow: renamed nodes morph by ID and survive repeated forward/backward 
   }
 });
 
+test('e2e 動画：同じキーが 3 場面続くとき、まん中の場面の要素は前の変形が終わるまで隠れている', {
+  skip: !(process.env.EXPLAIN_E2E === '1' && chrome), timeout: 60000,
+}, async () => {
+  assert.ok(chrome);
+  const dir = mkdtempSync(join(tmpdir(), 'explain-morph3-video-'));
+  let browser: Awaited<ReturnType<typeof launchChrome>> | undefined;
+  try {
+    browser = await launchChrome(chrome, join(dir, 'profile'));
+    const scene = (title: string, edge: string) => `## ${title}\n\`\`\`flow LR\n${edge}\n\`\`\`\n> [サーバー]が応える。\n`;
+    const source = scene('一つ目', 'クライアント -> サーバー') + scene('二つ目', 'サーバー -> DB') + scene('三つ目', 'ロードバランサー -> サーバー');
+    const { html } = await renderVideo(source);
+    const file = join(dir, 'video.html');
+    writeFileSync(file, html);
+    const page = await openPage(browser.cdp, file);
+    await page.evaluate('window.__amv.exportMode()');
+    const result = await page.evaluate(`(() => {
+      const data = JSON.parse(document.querySelector('#amv-data').textContent);
+      const scenes = [...document.querySelectorAll('.amv-scene')];
+      const middle = scenes[2].querySelector('[data-key="サーバー"]');
+      const state = (time) => {
+        window.render(time);
+        return {
+          ghosts: [...document.querySelectorAll('.amv-ghost')].filter(el => el.style.display !== 'none').length,
+          middle: middle.style.visibility !== 'hidden',
+        };
+      };
+      return {
+        intoMiddle: state(data.segments[2].start + 0.45),
+        onMiddle: state(data.segments[2].start + 1.5),
+        intoLast: state(data.segments[3].start + 0.45),
+      };
+    })()`);
+    assert.deepEqual(result, {
+      intoMiddle: { ghosts: 1, middle: false },
+      onMiddle: { ghosts: 0, middle: true },
+      intoLast: { ghosts: 1, middle: false },
+    });
+  } finally {
+    await browser?.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('e2e 動画：幅の広い flow は画面に収まり、表の行の強調はセルごとに枠を描かない', {
   skip: !(process.env.EXPLAIN_E2E === '1' && chrome), timeout: 60000,
 }, async () => {

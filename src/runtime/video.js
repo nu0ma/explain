@@ -123,6 +123,7 @@
     }
   }
   const carried = new Set(morphs.map((m) => m.to));
+  const morphed = new Set(morphs.flatMap((m) => [m.from, m.to]));
 
   function makeGhost(el) {
     const wrap = document.createElement('div');
@@ -235,6 +236,9 @@
       }
     }
 
+    // An element in a middle scene is the target of one morph and the source of the next,
+    // so collect what every morph hides before writing visibility once per element.
+    const hidden = new Set();
     for (const m of morphs) {
       const s0 = segs[m.scene].start;
       const during = t >= s0 && t < s0 + T;
@@ -242,11 +246,12 @@
       m.ghost.style.display = during ? '' : 'none';
       if (during) {
         m.ghost.style.transform = `translate(${lerp(m.a.x, m.b.x, p)}px, ${lerp(m.a.y, m.b.y, p)}px) scale(${lerp(m.a.s, m.b.s, p)})`;
+        hidden.add(m.from);
       }
-      m.from.style.visibility = during ? 'hidden' : '';
-      m.to.style.visibility = t < s0 + T ? 'hidden' : '';
+      if (t < s0 + T) hidden.add(m.to);
       m.to.style.opacity = 1;
     }
+    for (const el of morphed) el.style.visibility = hidden.has(el) ? 'hidden' : '';
 
     // camera and highlight
     const ev = camEvents.findLastIndex((e) => t >= e.t);
