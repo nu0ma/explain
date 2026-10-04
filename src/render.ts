@@ -113,7 +113,7 @@ export function renderDoc(source: string, overrides: RenderOverrides = {}, defau
   const panels = doc.panels.map((p) => ({ ...p, html: renderBlocks(p.blocks, ctx) }));
   const body = TEMPLATES[doc.meta.template]({ meta: doc.meta, introHtml, panels });
   if (isStatic && hasScript(body)) {
-    throw new ParseError('静的出力（--static / static: true）には JavaScript を入れられません。html ブロックなどにある <script>、on〜 属性、javascript: を削除してください', 0);
+    throw new ParseError('静的出力（--static / static: true）には JavaScript を入れられません。html ブロックなどにある <script> や <iframe> などのタグ、on〜 属性、javascript: を削除してください', 0);
   }
   const html = shell({ meta: doc.meta, body, source, isStatic });
   return { html, warnings, stats, meta: doc.meta, static: isStatic };
