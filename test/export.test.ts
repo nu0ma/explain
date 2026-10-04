@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { Writable } from 'node:stream';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { exportMp4, connect, ExportError } from '../src/video/export.ts';
+import { exportMp4, changedFrames, connect, ExportError } from '../src/video/export.ts';
 import type { CdpParams, CdpSocket, ExportDeps } from '../src/video/export.ts';
 
 // Stands in for ffmpeg: collects frames written to stdin and exits with exitCode when stdin closes.
@@ -34,25 +34,27 @@ const fakeFfmpeg = (opts: { exitCode?: number; stderr?: string } = {}) => new Fa
 
 // Stands in for Chrome: remembers the last time drawn per tab and returns "f<time>" as the screenshot.
 // Drawing the failAt time returns a script error.
-function fakeBrowser({ duration = 1, fps = 4, failAt = -1 } = {}) {
+function fakeBrowser({ duration = 1, fps = 4, failAt = -1, keyframes = undefined as [number, number][] | undefined } = {}) {
   let targets = 0;
   const drawn = new Map<string | undefined, number>();
   const browser = {
     stopped: false,
     profileDir: null as string | null,
     tabs: 0,
+    shots: 0,
     cdp: {
       async send(method: string, params: CdpParams = {}, sessionId?: string): Promise<unknown> {
         if (method === 'Target.createTarget') return { targetId: `t${++targets}` };
         if (method === 'Target.attachToTarget') { browser.tabs++; return { sessionId: `s-${String(params.targetId)}` }; }
         if (method === 'Runtime.evaluate') {
           const expression = String(params.expression);
-          if (expression.startsWith('document.fonts')) return { result: { value: { duration, fps } } };
+          if (expression.startsWith('document.fonts')) return { result: { value: { duration, fps, keyframes } } };
           const t = Number(/^render\((.+)\)$/.exec(expression)?.[1]);
           if (t === failAt) return { exceptionDetails: { text: 'boom' } };
           drawn.set(sessionId, t);
           return { result: {} };
         }
+        if (method === 'Page.captureScreenshot') browser.shots++;
         if (method === 'Page.captureScreenshot') return { data: Buffer.from(`f${drawn.get(sessionId)}`).toString('base64') };
         return {};
       },
@@ -98,6 +100,25 @@ test('exportMp4: 全フレームを順に ffmpeg に渡し、ブラウザを止�
     assert.equal(browser.stopped, true, name);
     assert.equal(existsSync(dirname(String(browser.profileDir))), false, `${name}: 一時ディレクトリ`);
   }
+});
+
+test('changedFrames: 変化する範囲に触れるフレームと、範囲が終わった直後のフレームだけを撮る', () => {
+  const cases: { name: string; req: [number, number][] | undefined; want: number[] }[] = [
+    { name: '範囲がわからない', req: undefined, want: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] },
+    { name: '変化しない', req: [], want: [0] },
+    { name: '途中で動く', req: [[0.25, 0.42]], want: [0, 3, 4, 5] },
+    { name: '一瞬で変わる', req: [[0.42, 0.42]], want: [0, 5] },
+    { name: '範囲が重なる', req: [[0.12, 0.18], [0.15, 0.22], [0.85, 2]], want: [0, 2, 3, 9] },
+  ];
+  for (const { name, req, want } of cases) assert.deepEqual(changedFrames(req, 10, 10), want, name);
+});
+
+test('exportMp4: 変化しないフレームは撮らず、前のフレームの画像を送り直す', async () => {
+  const { browser, ffmpeg, opts } = setup({ browser: fakeBrowser({ keyframes: [[0.4, 0.4]] }) });
+  const got = await exportMp4('/x/page.html', '/x/out.mp4', { ...opts, concurrency: 2 });
+  assert.deepEqual(got, { frames: 4, duration: 1 });
+  assert.equal(browser.shots, 2);
+  assert.deepEqual(ffmpeg.frames, ['f0', 'f0', 'f0.5', 'f0.5']);
 });
 
 test('exportMp4: 途中で失敗したら ExportError にし、ffmpeg とブラウザを止める', async () => {
