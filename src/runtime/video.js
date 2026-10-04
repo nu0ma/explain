@@ -97,7 +97,7 @@
     return out;
   }
 
-  // ── 3. Cross-scene morph: elements with the same name (data-key) in adjacent scenes ──
+  // ── 3. Cross-scene morph: elements with the same identity (data-key) in adjacent scenes ──
   const morphs = [];  // { scene, from, to, ghost, a, b }
   const keyed = (sc) => {
     const m = new Map();
@@ -161,7 +161,8 @@
   const findKey = (sc, key) => {
     const all = [...sc.querySelectorAll('[data-key]')];
     const norm = (s) => s.replace(/[`*]/g, '').trim().toLowerCase();
-    return all.find((el) => norm(el.dataset.key) === norm(key))
+    return all.find((el) => el.dataset.key === key)
+      ?? all.find((el) => norm(el.dataset.key) === norm(key))
       ?? all.find((el) => norm(el.dataset.key).includes(norm(key)))
       ?? [...sc.querySelectorAll(`${STEP_SEL}, text`)].find((el) => norm(el.textContent).includes(norm(key)));
   };

@@ -25,7 +25,7 @@ export type FlowEdge = { from: string; to: string; dashed: boolean; diff: FlowDi
 export type FlowGroup = { name: string; members: string[]; line: number };
 export type FlowModel = { nodes: Map<string, FlowNode>; edges: FlowEdge[]; groups: FlowGroup[] };
 
-type NodeSpec = Omit<FlowNode, 'line'>;
+type NodeSpec = Omit<FlowNode, 'line'> & { labelDeclared: boolean };
 type ChainStep = { arrow: string | null; nodes: NodeSpec[] };
 type NodeSize = { lines: string[]; width: number; height: number };
 type Box = { x: number; y: number; width: number; height: number };
@@ -62,12 +62,17 @@ A --> C                       ← 点線
 A -> B -> C                   ← 連鎖
 A -> B & C                    ← 分岐（ファンアウト）
 (開始)  {判定?}  [(データベース)]  [コロン: を含む文字]   ← 角丸・ひし形・円柱・長方形
+@api1[API] -> @api2[API]       ← IDを分けて同じ表示名のノードを描く
+api1 -> api2                  ← 宣言したIDで参照する
 *重要なノード                  ← 先頭の * で強調
 +新しいノード  ~変えるノード  -消すノード   ← 差分の色分け（追加・変更・削除）
 A +-> B   A x-> B             ← 追加する矢印・削除する矢印（前後に空白を入れる）
 group グループ名: B, C        ← ノードを 1 つのグループで囲む
 \`\`\`
 - ノードは括弧の中の文字で識別する。2 回目以降は文字だけで参照できる。向きの既定は TB（上から下）。
+- @id[表示名]でIDと表示名を分けられる。IDは英字か _ で始め、英数字・_・-・. を使う。ほかの形の括弧も使える。
+- 矢印とgroupではIDを参照する。同じIDを再び宣言すると、最後の表示名を使う。
+- 動画では同じIDのノードが場面をまたいでつながる。場面ごとに表示名を変えてもよい。同じ場面の別のノードには別のIDを使う。
 - 差分の印を使うと、図の下に凡例が出る。印はそのノードの最初の登場で 1 回だけ付ければよい。`,
   example: '```flow LR\n(ユーザー) -> ゲートウェイ: HTTPS\nゲートウェイ -> 認証 & *業務サービス\n業務サービス -> [(データベース)]\ngroup バックエンド: 認証, 業務サービス\n```',
   render(text, { args, uid }) {
@@ -81,10 +86,10 @@ export function parseFlow(text: string): FlowModel {
   const nodes = new Map<string, FlowNode>();
   const edges: FlowEdge[] = [];
   const groups: FlowGroup[] = [];
-  const upsert = (spec: NodeSpec, line: number): string => {
+  const upsert = ({ labelDeclared, ...spec }: NodeSpec, line: number): string => {
     const prev = nodes.get(spec.id);
     if (!prev) nodes.set(spec.id, { ...spec, line });
-    else nodes.set(spec.id, { ...prev, shape: spec.explicit ? spec.shape : prev.shape, hi: prev.hi || spec.hi, diff: prev.diff || spec.diff });
+    else nodes.set(spec.id, { ...prev, label: labelDeclared ? spec.label : prev.label, shape: spec.explicit ? spec.shape : prev.shape, hi: prev.hi || spec.hi, diff: prev.diff || spec.diff });
     return spec.id;
   };
 
@@ -148,6 +153,10 @@ function parseNode(t: string, start: number, line: number): { node: NodeSpec; en
   if (diff) pos++;
   const hi = t[pos] === '*';
   if (hi) pos++;
+  // Only the opt-in @id immediately followed by a shape bracket declares an ID.
+  // Ordinary bare labels (including API(v1), email addresses, and @mentions) stay unchanged.
+  const named = t.slice(pos).match(/^@([A-Za-z_][A-Za-z0-9_.-]*)(?=\[|\(|\{)/);
+  if (named) pos += named[0].length;
   const bracket = BRACKETS.find((b) => t.startsWith(b.open, pos));
   let label: string;
   let end: number;
@@ -163,7 +172,7 @@ function parseNode(t: string, start: number, line: number): { node: NodeSpec; en
     end = pos + (m?.[0].length ?? 0);
   }
   if (!label) throw new ComponentError(`flow に空のノードがあります："${t}"`, line);
-  return { node: { id: label, label, shape: bracket?.shape ?? 'rect', explicit: Boolean(bracket), hi, diff }, end };
+  return { node: { id: named?.[1] ?? label, label, labelDeclared: Boolean(named), shape: bracket?.shape ?? 'rect', explicit: Boolean(bracket), hi, diff }, end };
 }
 
 function nodeSize(node: FlowNode): NodeSize {
@@ -199,9 +208,12 @@ function layout({ nodes, edges, groups }: FlowModel, rankdir: Rankdir, id: strin
   g.setDefaultEdgeLabel(() => ({}));
   const sized = [...nodes.values()].map((n) => ({ n, size: nodeSize(n) }));
   for (const { n, size } of sized) g.setNode(n.id, { width: size.width, height: size.height });
-  groups.forEach((grp, i) => {
-    g.setNode(`__group${i}`, { label: grp.name });
-    grp.members.forEach((m) => g.setParent(m, `__group${i}`));
+  const groupIds = groups.map((grp, i) => {
+    let key = `__group${i}`;
+    while (g.hasNode(key)) key += '_';
+    g.setNode(key, { label: grp.name });
+    grp.members.forEach((m) => g.setParent(m, key));
+    return key;
   });
   edges.forEach((e, i) => {
     const label: EdgeLabel = e.label ? { label: e.label, width: measure(e.label, EDGE_FS) + 12, height: 18, labelpos: 'c' } : {};
@@ -210,7 +222,7 @@ function layout({ nodes, edges, groups }: FlowModel, rankdir: Rankdir, id: strin
   dagre.layout(g);
 
   const clusters = groups.map((grp, i) => {
-    const c = nodeBox(g, `__group${i}`);
+    const c = nodeBox(g, groupIds[i]);
     const x = c.x - c.width / 2;
     const y = c.y - c.height / 2;
     return `<rect class="am-cluster" x="${f(x)}" y="${f(y)}" width="${f(c.width)}" height="${f(c.height)}" rx="4"/><text class="am-cluster-label" x="${f(x + 8)}" y="${f(y + 14)}">${esc(grp.name)}</text>`;
@@ -233,13 +245,13 @@ function layout({ nodes, edges, groups }: FlowModel, rankdir: Rankdir, id: strin
   const nodeSvg = sized.map(({ n, size }) => {
     const { x, y } = nodeBox(g, n.id);
     const { width: w, height: h, lines } = size;
-    return `<g class="am-node am-node--${n.shape}${n.hi ? ' am-node--hi' : ''}${n.diff ? ` am-node--${n.diff}` : ''}" data-key="${esc(n.label)}" data-step="${stepOf.get(n.line)}">${shapeSvg(n.shape, x, y, w, h)}${textLines(lines, x, y + (n.shape === 'db' ? 4 : 0), LH)}</g>`;
+    return `<g class="am-node am-node--${n.shape}${n.hi ? ' am-node--hi' : ''}${n.diff ? ` am-node--${n.diff}` : ''}" data-key="${esc(n.id)}" data-step="${stepOf.get(n.line)}">${shapeSvg(n.shape, x, y, w, h)}${textLines(lines, x, y + (n.shape === 'db' ? 4 : 0), LH)}</g>`;
   });
 
   const graph = g.graph();
   const width = laidOut(graph.width, 'graph width');
   const height = laidOut(graph.height, 'graph height');
-  const label = `フロー図：${[...nodes.keys()].slice(0, 8).join('、')}`;
+  const label = `フロー図：${[...nodes.values()].slice(0, 8).map((n) => n.label).join('、')}`;
   return `${svgOpen(width, height, label)}${arrowDefs(id)}${diffArrowDefs(id, edges)}<g>${clusters.join('')}</g><g>${edgeSvg.join('')}</g><g>${nodeSvg.join('')}</g></svg>`;
 }
 
