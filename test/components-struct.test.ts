@@ -100,6 +100,28 @@ test('limits: 数でない値や列の不足はエラー', () => {
   throwsAt(() => render('limits', 'ラベルだけ'), 1);
 });
 
+test('limits: 上限が 0 以下、現在値が負、大きすぎる数はエラー', () => {
+  const big = '9'.repeat(400);
+  for (const row of ['x | 0', 'x | 0 / 0', 'x | 1 / 0', 'x | -5', 'x | -1 / 10', `x | ${big}`, `x | 1 / ${big}`]) {
+    throwsAt(() => render('limits', `a | 1 / 2\n${row}`), 2);
+  }
+});
+
+test('limits: 微小な値でも目盛りを有限個にし、切りのよい値で描く', () => {
+  const html = render('limits', 'x | 0.00001 / 0.00002\ny | 0.0001');
+  const ticks = html.match(/<span style="left: [^"]*">/g) ?? [];
+  assert.ok(ticks.length > 0 && ticks.length <= 16, `目盛り ${ticks.length} 個`);
+  assert.match(html, /am-lim-fill" style="width: 33.33%"/);
+  assert.match(html, />0.00003<\/span>/);
+});
+
+test('niceScale: 上限は常に正で、目盛りの数は 7 個以下', () => {
+  for (const v of [1e-12, 0.00001, 0.0001, 0.3, 1e9]) {
+    const { max, step } = niceScale(v);
+    assert.ok(max > v && step > 0 && max / step <= 7, `v=${v} → ${max}/${step}`);
+  }
+});
+
 test('niceScale: 整数の上限には整数の目盛りだけを使う', () => {
   assert.deepEqual(niceScale(1), { max: 2, step: 1 });
   assert.deepEqual(niceScale(2), { max: 3, step: 1 });
