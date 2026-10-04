@@ -193,21 +193,43 @@ export async function exportMp4(
       return Buffer.from(data, 'base64');
     };
     // Only frames that can change are captured; each screenshot is sent again for the unchanged frames that follow it.
-    // Capture one frame per tab at a time and pass them to ffmpeg in frame order. Small batches keep buffered frames in memory low.
+    // Each tab takes the next screenshot as soon as it is free. Finished screenshots wait in `ready` until the ones
+    // before them are written, so ffmpeg gets frames in order. A tab stops `ahead` screenshots past the oldest unwritten one,
+    // which keeps buffered frames in memory low.
     const shots = changedFrames(info.keyframes, frames, info.fps);
+    const ahead = pages.length * 2;
+    const ready = new Map<number, Buffer>();
+    const waiting: (() => void)[] = [];
+    let next = 0;
+    let written = 0;
     let reported = -1;
-    for (let j = 0; j < shots.length; j += pages.length) {
-      const batch = await Promise.all(shots.slice(j, j + pages.length).map((f, k) => capture(pages[k], f)));
-      let n = 0;
-      for (const [k, buf] of batch.entries()) {
-        n = shots[j + k + 1] ?? frames;
-        for (let f = shots[j + k]; f < n; f++) await write(buf);
+    const drain = async () => {
+      while (ready.has(written)) {
+        const buf = ready.get(written) as Buffer;
+        ready.delete(written);
+        const n = shots[written + 1] ?? frames;
+        for (let f = shots[written]; f < n; f++) await write(buf);
+        written++;
+        for (const wake of waiting.splice(0)) wake();
+        if (Math.floor((n - 1) / 30) > reported || n === frames) {
+          reported = Math.floor((n - 1) / 30);
+          onProgress(n, frames);
+        }
       }
-      if (Math.floor((n - 1) / 30) > reported || n === frames) {
-        reported = Math.floor((n - 1) / 30);
-        onProgress(n, frames);
+    };
+    let writing = Promise.resolve();
+    const worker = async (page: Page) => {
+      while (next < shots.length) {
+        const j = next++;
+        // done settles only when ffmpeg exits, so a failed ffmpeg also ends the wait.
+        while (j >= written + ahead) await Promise.race([new Promise<void>((r) => waiting.push(r)), done]);
+        ready.set(j, await capture(page, shots[j]));
+        writing = writing.then(drain);
+        writing.catch(() => {}); // Rejections are rethrown by the await below.
       }
-    }
+    };
+    await Promise.all(pages.map(worker));
+    await writing;
     proc.stdin.end();
     await done;
     encoded = true;

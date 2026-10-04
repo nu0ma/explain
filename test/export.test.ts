@@ -33,8 +33,8 @@ class FakeFfmpeg extends EventEmitter {
 const fakeFfmpeg = (opts: { exitCode?: number; stderr?: string } = {}) => new FakeFfmpeg(opts);
 
 // Stands in for Chrome: remembers the last time drawn per tab and returns "f<time>" as the screenshot.
-// Drawing the failAt time returns a script error.
-function fakeBrowser({ duration = 1, fps = 4, failAt = -1, keyframes = undefined as [number, number][] | undefined } = {}) {
+// Drawing the failAt time returns a script error. Screenshots in the slowTab session take 20 ms.
+function fakeBrowser({ duration = 1, fps = 4, failAt = -1, keyframes = undefined as [number, number][] | undefined, slowTab = '' } = {}) {
   let targets = 0;
   const drawn = new Map<string | undefined, number>();
   const browser = {
@@ -54,7 +54,10 @@ function fakeBrowser({ duration = 1, fps = 4, failAt = -1, keyframes = undefined
           drawn.set(sessionId, t);
           return { result: {} };
         }
-        if (method === 'Page.captureScreenshot') browser.shots++;
+        if (method === 'Page.captureScreenshot') {
+          browser.shots++;
+          if (sessionId === slowTab) await new Promise((r) => setTimeout(r, 20));
+        }
         if (method === 'Page.captureScreenshot') return { data: Buffer.from(`f${drawn.get(sessionId)}`).toString('base64') };
         return {};
       },
@@ -85,7 +88,7 @@ function setup({
 test('exportMp4: 全フレームを順に ffmpeg に渡し、ブラウザを止めて一時ディレクトリを消す', async () => {
   const cases = [
     { name: '音声なし・タブ 1 枚', wav: undefined, concurrency: 1, wantAudio: false, wantProgress: [[1, 4], [4, 4]] },
-    { name: '音声あり・タブ 3 枚', wav: Buffer.from('RIFF'), concurrency: 3, wantAudio: true, wantProgress: [[3, 4], [4, 4]] },
+    { name: '音声あり・タブ 3 枚', wav: Buffer.from('RIFF'), concurrency: 3, wantAudio: true, wantProgress: [[1, 4], [4, 4]] },
   ];
   for (const { name, wav, concurrency, wantAudio, wantProgress } of cases) {
     const { browser, ffmpeg, progress, opts } = setup();
@@ -119,6 +122,12 @@ test('exportMp4: 変化しないフレームは撮らず、前のフレームの
   assert.deepEqual(got, { frames: 4, duration: 1 });
   assert.equal(browser.shots, 2);
   assert.deepEqual(ffmpeg.frames, ['f0', 'f0', 'f0.5', 'f0.5']);
+});
+
+test('exportMp4: 遅いタブがあっても空いたタブが次のフレームを撮り、フレームの順に ffmpeg に渡す', async () => {
+  const { ffmpeg, opts } = setup({ browser: fakeBrowser({ duration: 2, slowTab: 's-t1' }) });
+  await exportMp4('/x/page.html', '/x/out.mp4', { ...opts, concurrency: 2 });
+  assert.deepEqual(ffmpeg.frames, ['f0', 'f0.25', 'f0.5', 'f0.75', 'f1', 'f1.25', 'f1.5', 'f1.75']);
 });
 
 test('exportMp4: 途中で失敗したら ExportError にし、ffmpeg とブラウザを止める', async () => {
