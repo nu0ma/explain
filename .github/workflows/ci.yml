@@ -22,3 +22,24 @@ jobs:
       - name: Check that the committed bundle matches the build
         run: git diff --exit-code -- skills/explain/scripts/explain.mjs
       - run: pnpm test
+
+  # The browser, speech, and MP4 export tests need Chrome, macOS say, and ffmpeg, so they run on macOS.
+  # Every test must run here: a skip means a dependency is missing and the video output went unchecked.
+  e2e:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: brew install ffmpeg
+      - run: pnpm install --frozen-lockfile
+      - name: Run all tests with EXPLAIN_E2E=1 and fail on any skip
+        env:
+          EXPLAIN_E2E: '1'
+        run: |
+          set -o pipefail
+          node --test --test-reporter=tap "test/*.test.ts" | tee e2e.tap
+          grep -q '^# skipped 0$' e2e.tap || { echo "::error::Some tests were skipped in the E2E job"; grep -E '# SKIP' e2e.tap; exit 1; }

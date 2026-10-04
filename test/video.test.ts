@@ -365,9 +365,12 @@ test('e2e: --mp4 で 1080p30・音声つきの動画を書き出す', { skip: !E
   const r = await run(['video', '-', '-o', 'e2e.html', '--mp4'], { stdin: short, ttsProvider: fakeProvider() });
   assert.equal(r.code, 0, r.err);
   const { execFileSync } = await import('node:child_process');
-  const probe = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height', '-of', 'csv=p=0', join(dir, 'e2e.mp4')], { encoding: 'utf8' });
-  assert.match(probe, /video,1920,1080/);
+  const probe = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,avg_frame_rate:format=duration', '-of', 'csv=p=0', join(dir, 'e2e.mp4')], { encoding: 'utf8' });
+  assert.match(probe, /video,1920,1080,30\/1/);
   assert.match(probe, /audio/);
+  const want = Number(r.out.match(/([\d.]+) 秒/)?.[1]);
+  const got = Number(probe.trim().split('\n').at(-1));
+  assert.ok(Math.abs(got - want) < 0.2, `MP4 の長さ ${got} 秒が再生ページの ${want} 秒と合わない`);
 });
 
 test('videoMode: light と dark はそのまま、それ以外は auto。3b1b は常に dark', () => {

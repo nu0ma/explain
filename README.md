@@ -225,7 +225,7 @@ Then ask your agent to apply yomiyasu to the script, and run `explain lint` agai
 
 ```sh
 pnpm install
-pnpm test                        # unit tests; EXPLAIN_E2E=1 also runs the Chrome tests
+pnpm test                        # unit tests; EXPLAIN_E2E=1 also runs the Chrome, say, and ffmpeg tests (CI runs them on macOS)
 pnpm run build                   # rebuild skills/explain/scripts/explain.mjs and commit it
 claude plugin validate .
 ```
