@@ -87,7 +87,8 @@ export async function snapshot(
     if (pngFile) {
       const height = Math.min(MAX_HEIGHT, Math.ceil(Number(await page.evaluate('document.documentElement.scrollHeight'))));
       await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-      const { data } = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } });
+      // optimizeForSpeed encodes the PNG faster (about 66 ms to 49 ms on the demo page); the file is about a quarter larger.
+      const { data } = await page.send('Page.captureScreenshot', { format: 'png', optimizeForSpeed: true, captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } });
       writeFileSync(pngFile, Buffer.from(data, 'base64'));
     }
     return { issues: issues.slice(0, MAX_ISSUES), truncated: Math.max(0, issues.length - MAX_ISSUES) };

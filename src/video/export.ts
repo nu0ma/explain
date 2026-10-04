@@ -83,7 +83,7 @@ interface CdpCommands {
   'Page.enable': { params: Record<string, never>; result: unknown };
   'Page.navigate': { params: { url: string }; result: unknown };
   'Page.captureScreenshot': {
-    params: { format: 'jpeg' | 'png'; quality?: number; captureBeyondViewport?: boolean; clip: { x: number; y: number; width: number; height: number; scale: number } };
+    params: { format: 'jpeg' | 'png'; quality?: number; optimizeForSpeed?: boolean; captureBeyondViewport?: boolean; clip: { x: number; y: number; width: number; height: number; scale: number } };
     result: { data: string };
   };
   'Runtime.evaluate': {

@@ -58,6 +58,7 @@ explain cache [clear]                               # show (or clear) the narrat
 - Output goes to `~/.explain/pages/` and `~/.explain/videos/`; settings live in `~/.explain/config.json`. Set `EXPLAIN_HOME` to change the location. If only `~/.explain-cli/` (the directory from before the rename) exists, the CLI keeps using it.
 - `pnpm run build` writes `skills/explain/scripts/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 24.21 or later. The bundle is committed so that the plugin works without `pnpm install`; rebuild it whenever `src/` changes, because CI fails when it differs from the build output. The sources are TypeScript and run directly on Node without a build step.
 - Video narration is synthesized only with macOS `say`, using a Japanese voice (Kyoko, Eddy, Flo, or Reed, in that order). No external TTS service or API key is used. On other platforms, use `--voice off` for a subtitles-only video.
+- `--png` and `--mp4` use the installed Chrome, Chromium, Edge, or Brave. Set `EXPLAIN_CHROME` to use another binary. Pointing it to `chrome-headless-shell` (for example, from `npx @puppeteer/browsers install chrome-headless-shell@stable` or the Playwright cache) cuts the browser launch from about 0.5 s to about 0.1 s, which makes `--png` noticeably faster. The CLI does not pick the headless shell on its own: its version can differ from the installed Chrome, and layout checks and images can then differ by a few pixels.
 
 ## Stable flow node IDs
 
