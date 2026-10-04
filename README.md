@@ -9,6 +9,22 @@ A CLI that turns a Markdown script into a self-contained, single-file explainer 
 - Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
 - With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript.
 
+## Demo
+
+Both demos explain the Transactional Outbox pattern.
+
+### Explainer page (`explain render`)
+
+Built from [transactional-outbox.md](docs/demo/transactional-outbox.md). The output is [transactional-outbox.html](docs/demo/transactional-outbox.html).
+
+[![Explainer page for Transactional Outbox](docs/demo/transactional-outbox.png)](docs/demo/transactional-outbox.html)
+
+### Explainer video (`explain video --mp4`)
+
+Built from [transactional-outbox.video.md](docs/demo/transactional-outbox.video.md). The GIF below plays at 2x speed without audio. Click it to open the [MP4 with narration](docs/demo/transactional-outbox.video.mp4).
+
+[![Explainer video for Transactional Outbox](docs/demo/transactional-outbox.video.gif)](docs/demo/transactional-outbox.video.mp4)
+
 ## Usage
 
 ```sh
