@@ -46,20 +46,41 @@ Needs only Node 24.21+. `--png` and `--mp4` also use Chrome, MP4 export uses ffm
 
 ## Gallery
 
-<table>
-<tr>
-<td width="50%"><a href="docs/demo/transactional-outbox.html"><img src="docs/demo/transactional-outbox.png" alt="Explainer page for Transactional Outbox"></a><br><b>Transactional Outbox</b><br><sub>Before/after flow, sequence, comparison table · <a href="docs/demo/transactional-outbox.md">script</a></sub></td>
-<td width="50%"><a href="docs/demo/oauth2-authorization-code.html"><img src="docs/demo/oauth2-authorization-code.png" alt="Explainer page for the OAuth 2.0 authorization code flow"></a><br><b>OAuth 2.0 authorization code flow</b><br><sub>13 steps across five actors · <a href="docs/demo/oauth2-authorization-code.md">script</a></sub></td>
-</tr>
-<tr>
-<td width="50%"><a href="docs/demo/tcp-handshake.html"><img src="docs/demo/tcp-handshake.png" alt="Explainer page for the TCP three-way handshake"></a><br><b>TCP three-way handshake</b><br><sub>Sequence with connection states · <a href="docs/demo/tcp-handshake.md">script</a></sub></td>
-<td width="50%"><a href="docs/demo/mp4-export-speedup.html"><img src="docs/demo/mp4-export-speedup.png" alt="Explainer page for the MP4 export speed-up"></a><br><b>How MP4 export got 3x faster</b><br><sub>Pipeline flow, measured times, what helped · <a href="docs/demo/mp4-export-speedup.md">script</a></sub></td>
-</tr>
-<tr>
-<td width="50%"><a href="docs/demo/transactional-outbox.video.mp4"><img src="docs/demo/transactional-outbox.video.gif" alt="Explainer video for Transactional Outbox"></a><br><b>Video: Transactional Outbox</b><br><sub>Click for the MP4 · <a href="docs/demo/transactional-outbox.video.md">script</a></sub></td>
-<td width="50%"><a href="docs/demo/dns-resolution.video.mp4"><img src="docs/demo/dns-resolution.video.gif" alt="Explainer video for DNS name resolution"></a><br><b>Video: DNS name resolution</b><br><sub>Click for the MP4 · <a href="docs/demo/dns-resolution.video.md">script</a></sub></td>
-</tr>
-</table>
+### Transactional Outbox
+
+Before/after flow, sequence, comparison table · [script](docs/demo/transactional-outbox.md)
+
+[![Explainer page for Transactional Outbox](docs/demo/transactional-outbox.png)](docs/demo/transactional-outbox.html)
+
+### OAuth 2.0 authorization code flow
+
+13 steps across five actors · [script](docs/demo/oauth2-authorization-code.md)
+
+[![Explainer page for the OAuth 2.0 authorization code flow](docs/demo/oauth2-authorization-code.png)](docs/demo/oauth2-authorization-code.html)
+
+### TCP three-way handshake
+
+Sequence with connection states · [script](docs/demo/tcp-handshake.md)
+
+[![Explainer page for the TCP three-way handshake](docs/demo/tcp-handshake.png)](docs/demo/tcp-handshake.html)
+
+### How MP4 export got 3x faster
+
+Pipeline flow, measured times, what helped · [script](docs/demo/mp4-export-speedup.md)
+
+[![Explainer page for the MP4 export speed-up](docs/demo/mp4-export-speedup.png)](docs/demo/mp4-export-speedup.html)
+
+### Video: Transactional Outbox
+
+Click for the MP4 · [script](docs/demo/transactional-outbox.video.md)
+
+[![Explainer video for Transactional Outbox](docs/demo/transactional-outbox.video.gif)](docs/demo/transactional-outbox.video.mp4)
+
+### Video: DNS name resolution
+
+Click for the MP4 · [script](docs/demo/dns-resolution.video.md)
+
+[![Explainer video for DNS name resolution](docs/demo/dns-resolution.video.gif)](docs/demo/dns-resolution.video.mp4)
 
 ## Commands
 
