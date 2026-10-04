@@ -49,6 +49,8 @@ export interface ExportOptions {
   env?: NodeJS.ProcessEnv;
   onProgress?: (done: number, total: number) => void;
   concurrency?: number;
+  // How many Chrome processes share the tabs. One Chrome takes about 40 ms per screenshot no matter how many tabs it has.
+  browsers?: number;
   deps?: ExportDeps;
 }
 
@@ -122,11 +124,12 @@ export function findChrome(env: NodeJS.ProcessEnv = process.env, platform: NodeJ
 }
 
 // render(t) is deterministic, so the same page is opened in `concurrency` tabs and frames are split between them.
+// The tabs are spread over `browsers` Chrome processes, because screenshots in one Chrome do not run in parallel.
 // deps replaces the browser and ffmpeg launchers (for tests).
 export async function exportMp4(
   htmlFile: string,
   mp4File: string,
-  { wav, env = process.env, onProgress = () => {}, concurrency = Math.min(4, availableParallelism()), deps = {} }: ExportOptions = {},
+  { wav, env = process.env, onProgress = () => {}, concurrency = Math.min(8, availableParallelism()), browsers = Math.ceil(concurrency / 2), deps = {} }: ExportOptions = {},
 ): Promise<{ frames: number; duration: number }> {
   const { has = hasCommand, find = findChrome, launch = launchChrome, encoder = spawnFfmpeg } = deps;
   if (!has('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
@@ -134,13 +137,15 @@ export async function exportMp4(
   if (!chromePath) throw new ExportError('Chrome / Chromium / Edge が見つかりません。環境変数 EXPLAIN_CHROME でブラウザのパスを指定できます');
 
   const tmp = mkdtempSync(join(tmpdir(), 'explain-export-'));
-  let browser: Browser | null = null;
+  const launched: Browser[] = [];
   let ffmpeg: EncoderProcess | null = null;
   let encoded = false;
   try {
-    browser = await launch(chromePath, join(tmp, 'profile'));
-    const { cdp } = browser;
-    const pages = await Promise.all(Array.from({ length: Math.max(1, concurrency) }, () => openPage(cdp, htmlFile)));
+    const tabs = Math.max(1, concurrency);
+    await Promise.all(Array.from({ length: Math.min(tabs, Math.max(1, browsers)) }, async (_, i) => {
+      launched.push(await launch(chromePath, join(tmp, `profile-${i}`)));
+    }));
+    const pages = await Promise.all(Array.from({ length: tabs }, (_, i) => openPage(launched[i % launched.length].cdp, htmlFile)));
     const infos = await Promise.all(pages.map((p) => p.evaluate('document.fonts.ready.then(() => { window.__amv.exportMode(); return { duration: window.__amv.duration, fps: window.__amv.fps }; })')));
     // The expression above returns this shape from the player page.
     const info = infos[0] as PlayerInfo;
@@ -191,7 +196,7 @@ export async function exportMp4(
       ffmpeg.stdin.destroy();
       ffmpeg.kill('SIGKILL');
     }
-    if (browser) await browser.stop();
+    await Promise.all(launched.map((b) => b.stop()));
     try {
       rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
     } catch {
