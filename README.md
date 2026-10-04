@@ -17,6 +17,7 @@ pnpm add --global "$PWD"      # installs the explain command (or run node bin/ex
 
 explain render examples/pr-before-after.md          # build an explainer page and open it in the browser
 explain render examples/pr-before-after.md --static # build HTML without <script>
+explain render examples/pr-before-after.md --watch  # serve the page and rebuild/reload on every save
 explain lint   examples/pr-before-after.md          # run the STE check only
 explain video  script.md --voice system             # build a video player page (add --mp4 for an MP4 file)
 explain help format                                 # script format

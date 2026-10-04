@@ -181,3 +181,61 @@ test('shouldOpen: --no-open > EXPLAIN_NO_OPEN > 設定 open。--open は必ず�
   ];
   for (const { req, want } of cases) assert.equal(shouldOpen(...req), want, JSON.stringify(req));
 });
+
+test('cli render --watch: 標準入力や原稿なしでは使えない', async () => {
+  const cases = [
+    { name: '標準入力', req: ['render', '-', '--watch'] },
+    { name: '原稿なし', req: ['render', '--watch'] },
+  ];
+  for (const { name, req } of cases) {
+    const r = await run(req);
+    assert.equal(r.code, 2, name);
+    assert.match(r.err, /--watch には原稿のファイルを指定してください/, name);
+  }
+});
+
+// 条件を満たすまで少しずつ待つ。
+async function until(fn, label) {
+  for (let i = 0; i < 200; i++) {
+    const v = await fn();
+    if (v) return v;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`待ちきれません：${label}`);
+}
+
+test('cli render --watch: 配信し、保存すると作り直して再読み込みを知らせる。エラーでは前のページを残す', async () => {
+  const file = join(dir, 'watch.md');
+  const outFile = join(dir, 'watch-out.html');
+  writeFileSync(file, GOOD);
+  const out = sink();
+  const err = sink();
+  const ac = new AbortController();
+  const done = main(['render', file, '--watch', '-o', outFile], {
+    stdout: out.stream, stderr: err.stream, env: { EXPLAIN_NO_OPEN: '1', EXPLAIN_HOME: dir }, cwd: dir, signal: ac.signal,
+  });
+  try {
+    const url = await until(() => out.text.match(/✓ (http:\/\/127\.0\.0\.1:\d+\/)/)?.[1], 'URL');
+    const first = await (await fetch(url)).text();
+    assert.match(first, /<h1>CLI テスト<\/h1>/);
+    assert.match(first, /new EventSource\('\/__explain\/events'\)/);
+    assert.doesNotMatch(readFileSync(outFile, 'utf8'), /EventSource/, '-o のファイルには再読み込みのスクリプトを入れない');
+
+    const events = await fetch(`${url}__explain/events`);
+    const reader = events.body.getReader();
+    await reader.read(); // 接続の確認
+    writeFileSync(file, GOOD.replace('CLI テスト', '書き換えた題名'));
+    const { value } = await reader.read();
+    assert.match(new TextDecoder().decode(value), /data: reload/);
+    assert.match(await (await fetch(url)).text(), /<h1>書き換えた題名<\/h1>/);
+    assert.match(readFileSync(outFile, 'utf8'), /<h1>書き換えた題名<\/h1>/);
+    reader.cancel();
+
+    writeFileSync(file, '---\ntitle: 壊れた\n---\n## A\n```flow\n(閉じない -> C\n```\n');
+    await until(() => /\[flow\]/.test(err.text), 'エラーの表示');
+    assert.match(await (await fetch(url)).text(), /<h1>書き換えた題名<\/h1>/, 'エラーのときは前のページを配信し続ける');
+  } finally {
+    ac.abort();
+  }
+  assert.equal(await done, 0);
+});

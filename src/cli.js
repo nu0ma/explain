@@ -12,6 +12,7 @@ import { lintDoc, formatWarning } from './lint/ste.js';
 import { COMPONENTS } from './components/index.js';
 import { THEMES } from './themes/index.js';
 import { renderVideo } from './video/render.js';
+import { serveWatch } from './watch.js';
 import { pickProvider, TtsError, VOICES } from './video/tts.js';
 import { exportMp4, ExportError } from './video/export.js';
 import { explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from './config.js';
@@ -21,9 +22,9 @@ const MAX_LISTED_WARNINGS = 20;
 const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの解説 HTML と解説動画を作る
 
 使い方:
-  explain render <file|->  [-o 出力先] [--no-open] [--static] [--theme blueprint|shadcn]
+  explain render <file|->  [-o 出力先] [--no-open] [--static] [--watch] [--theme blueprint|shadcn]
                            [--template sheet|doc] [--style off|80|strict] [--mode auto|light|dark]
-                                                     解説ページ（HTML）を作る
+                                                     解説ページ（HTML）を作る。--watch は保存するたびに作り直してブラウザを再読み込みする
   explain video  <file|->  [-o 出力先] [--voice auto|elevenlabs|system|off] [--mp4] [--no-open]
                            [--theme blueprint|shadcn|3b1b] [--mode auto|light|dark]
                                                      3b1b 風の解説動画の再生ページを作る（--mp4 で動画ファイルも保存）
@@ -35,6 +36,7 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
 
 - ファイルの代わりに - を渡すと標準入力から読む（heredoc 向け：explain render - <<'EOF' ... EOF）。
 - 出力先の既定は ~/.explain-cli/pages/ と ~/.explain-cli/videos/（環境変数 EXPLAIN_HOME で変更できる）。
+- --watch はローカルのサーバーからページを配信し、原稿を保存するたびに作り直す（Ctrl+C で終了）。-o を渡すとファイルにも書く。
 - --static は <script> を含まない HTML を出す（切り替えボタンと原稿コピーなし。配色は OS の設定に従う）。
 - ブラウザを自動で開くか、既定のテーマなどは explain config で設定する。--open / --no-open はその回だけ有効。`;
 
@@ -116,6 +118,7 @@ export async function main(argv, io = {}) {
         'no-open': { type: 'boolean' },
         open: { type: 'boolean' },
         static: { type: 'boolean' },
+        watch: { type: 'boolean' },
         theme: { type: 'string' },
         template: { type: 'string' },
         style: { type: 'string' },
@@ -136,7 +139,9 @@ export async function main(argv, io = {}) {
   if (opts.help || !cmd) return print(USAGE), 0;
 
   switch (cmd) {
-    case 'render': return withSource(arg, io, fail, (src) => cmdRender(src, opts, { print, fail, env, cwd: io.cwd }));
+    case 'render':
+      if (opts.watch) return cmdWatch(arg, opts, { print, fail, env, cwd: io.cwd, signal: io.signal });
+      return withSource(arg, io, fail, (src) => cmdRender(src, opts, { print, fail, env, cwd: io.cwd }));
     case 'video':
       if (opts.static) {
         fail('✗ explain video では --static を使えません。動画の再生には JavaScript が必要です');
@@ -208,6 +213,64 @@ function cmdRender(src, opts, { print, fail, env, cwd }) {
   print(`  ${result.meta.template} · ${result.meta.theme} · パネル ${result.stats.panels} 枚${comps ? ` · ${comps}` : ''}${result.static ? ' · 静的（script なし）' : ''}`);
   printWarnings(result.warnings, print, result.meta.style);
   if (shouldOpen(opts, env, config.values)) openFile(file);
+  return 0;
+}
+
+// --watch：ファイルの原稿だけを受け付ける。エラーがあっても止まらず、直して保存すれば作り直す。
+async function cmdWatch(arg, opts, { print, fail, env, cwd, signal }) {
+  if (!arg || arg === '-') {
+    fail('✗ --watch には原稿のファイルを指定してください。標準入力は見張れません');
+    return 2;
+  }
+  const file = resolve(cwd ?? process.cwd(), arg);
+  const config = readConfig(env);
+  if (config.warning) fail(`! ${config.warning}`);
+  const { theme, mode, style } = config.values;
+  const out = opts.out ? resolve(cwd ?? process.cwd(), opts.out) : null;
+  const build = () => {
+    let src;
+    try {
+      src = readFileSync(file, 'utf8');
+    } catch (e) {
+      fail(`✗ 原稿を読めません：${e.message}`);
+      return null;
+    }
+    try {
+      const result = renderDoc(src, { theme: opts.theme, template: opts.template, style: opts.style, mode: opts.mode, static: opts.static }, { theme, mode, style });
+      if (out) {
+        mkdirSync(dirname(out), { recursive: true });
+        writeFileSync(out, result.html);
+      }
+      print(`✓ ${new Date().toTimeString().slice(0, 8)} 作り直しました · パネル ${result.stats.panels} 枚`);
+      printWarnings(result.warnings, print, result.meta.style);
+      return result.html;
+    } catch (e) {
+      try {
+        reportError(e, fail);
+      } catch {
+        fail(`✗ 内部エラー：${e.stack || e}`);
+      }
+      return null;
+    }
+  };
+
+  let ac = null;
+  if (!signal) {
+    ac = new AbortController();
+    process.once('SIGINT', () => ac.abort());
+  }
+  try {
+    await serveWatch(file, build, {
+      signal: signal ?? ac.signal,
+      onListen: (url) => {
+        print(`✓ ${url}（原稿を保存すると作り直します。Ctrl+C で終了）`);
+        if (shouldOpen(opts, env, config.values)) openFile(url);
+      },
+    });
+  } catch (e) {
+    fail(`✗ サーバーを起動できません：${e.message}`);
+    return 1;
+  }
   return 0;
 }
 
