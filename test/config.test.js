@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { configPath, explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from '../src/config.js';
 import { renderDoc } from '../src/render.js';
 
-const DEFAULTS = { open: true, theme: 'blueprint', mode: 'auto', style: '80', voice: 'auto' };
+const DEFAULTS = { open: true, theme: 'blueprint', mode: 'auto', style: '80', voice: 'say' };
 
 let home;
 let env;

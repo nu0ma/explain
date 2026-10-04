@@ -1,4 +1,4 @@
-// ナレーションの音声。優先順：ElevenLabs（ELEVENLABS_API_KEY があるとき）→ OS の読み上げ（macOS の say / Linux の espeak-ng）→ 字幕だけ。
+// ナレーションの音声。macOSのsayで読み上げる。--voice offなら音声を作らず、字幕だけにする。
 // 1 文ごとの合成結果は 22050 Hz・モノラル・16 ビット PCM。文と声の組で EXPLAIN_HOME/cache/tts/ にキャッシュし、再描画では合成し直さない。
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -9,9 +9,8 @@ import { join } from 'node:path';
 export const SAMPLE_RATE = 22050;
 // キャッシュの上限。22050 Hz・16 ビットで約 75 分ぶん。超えたら最後に使った時刻が古いものから消す。
 export const CACHE_MAX_BYTES = 200 * 1024 * 1024;
-export const VOICES = ['auto', 'elevenlabs', 'system', 'off'];
-const ELEVEN_DEFAULT_VOICE = 'JBFqnCBsd6RMkjVDRZzb';
-const ELEVEN_MODEL = 'eleven_multilingual_v2';
+// say：macOSのsayで読み上げる（既定）。off：音声を作らず、字幕だけにする。
+export const VOICES = ['say', 'off'];
 
 export class TtsError extends Error {
   constructor(message) {
@@ -20,69 +19,22 @@ export class TtsError extends Error {
   }
 }
 
-// 実際に使う音声を選ぶ。{ name, synth(text) → Int16Array } か null（字幕だけ）を返す。
-export function pickProvider(choice, env, { platform = process.platform, which = hasCommand } = {}) {
-  const eleven = () => elevenLabs(env);
-  const system = () => systemVoice(platform, which);
+// 使う音声を選ぶ。{ name, synth(text) → Int16Array }か、字幕だけならnullを返す。
+export function pickProvider(choice, { platform = process.platform, which = hasCommand } = {}) {
   if (choice === 'off') return null;
-  if (choice === 'elevenlabs') {
-    if (!env.ELEVENLABS_API_KEY) throw new TtsError('voice=elevenlabs には環境変数 ELEVENLABS_API_KEY が必要です');
-    return eleven();
+  if (platform !== 'darwin' || !which('say')) {
+    throw new TtsError('ナレーションの音声にはmacOSのsayが必要です');
   }
-  if (choice === 'system') {
-    const p = system();
-    if (!p) throw new TtsError('OS の読み上げ機能が見つかりません。macOS には say があります。Linux では espeak-ng を入れてください');
-    return p;
-  }
-  if (env.ELEVENLABS_API_KEY) return eleven();
-  return system();
-}
-
-function elevenLabs(env) {
-  const voice = env.ELEVENLABS_VOICE_ID || ELEVEN_DEFAULT_VOICE;
+  const voice = macVoice();
   return {
-    name: 'elevenlabs',
-    id: `elevenlabs:${voice}:${ELEVEN_MODEL}`,
-    concurrency: 2,
-    async synth(text) {
-      const url = `https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=pcm_${SAMPLE_RATE}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'xi-api-key': env.ELEVENLABS_API_KEY, 'content-type': 'application/json' },
-        body: JSON.stringify({ text, model_id: ELEVEN_MODEL }),
-      });
-      if (!res.ok) throw new TtsError(`ElevenLabs がエラーを返しました（${res.status}）：${(await res.text()).slice(0, 200)}`);
-      const buf = Buffer.from(await res.arrayBuffer());
-      return new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2)).slice();
-    },
+    name: 'say',
+    id: `say:${voice ?? 'default'}`,
+    concurrency: 4,
+    synth: (text) => withTemp(async (file) => {
+      await run('say', [...(voice ? ['-v', voice] : []), '-o', file, '--file-format=WAVE', `--data-format=LEI16@${SAMPLE_RATE}`, text]);
+      return readWav(readFileSync(file));
+    }),
   };
-}
-
-function systemVoice(platform, which) {
-  if (platform === 'darwin' && which('say')) {
-    const voice = macVoice();
-    return {
-      name: 'say',
-      id: `say:${voice ?? 'default'}`,
-      concurrency: 4,
-      synth: (text) => withTemp(async (file) => {
-        await run('say', [...(voice ? ['-v', voice] : []), '-o', file, '--file-format=WAVE', `--data-format=LEI16@${SAMPLE_RATE}`, text]);
-        return readWav(readFileSync(file));
-      }),
-    };
-  }
-  if (which('espeak-ng')) {
-    return {
-      name: 'espeak-ng',
-      id: 'espeak-ng:ja',
-      concurrency: 4,
-      synth: (text) => withTemp(async (file) => {
-        await run('espeak-ng', ['-v', 'ja', '-w', file, text]);
-        return readWav(readFileSync(file));
-      }),
-    };
-  }
-  return null;
 }
 
 // macOS の日本語の声を選ぶ。ja_JP の声を MAC_JA_VOICES の順で探す。

@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { CHOICES } from './parse.js';
+import { VOICES } from './video/tts.js';
 
 export class ConfigError extends Error {
   constructor(message) {
@@ -20,7 +21,7 @@ export const CONFIG_KEYS = Object.freeze({
   theme: { type: 'enum', choices: CHOICES.theme, default: 'blueprint', label: '既定のテーマ' },
   mode: { type: 'enum', choices: CHOICES.mode, default: 'auto', label: '既定の配色' },
   style: { type: 'enum', choices: CHOICES.style, default: '80', label: 'STE 検査の厳しさ' },
-  voice: { type: 'enum', choices: ['auto', 'elevenlabs', 'system', 'off'], default: 'auto', label: '動画のナレーション音声（auto：ELEVENLABS_API_KEY があれば ElevenLabs、なければ OS の読み上げ）' },
+  voice: { type: 'enum', choices: VOICES, default: 'say', label: '動画のナレーション音声（say：macOSのsayで読み上げる、off：字幕だけ）' },
 });
 
 const TRUE = new Set(['on', 'true', 'yes', '1', 'オン']);

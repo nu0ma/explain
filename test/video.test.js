@@ -121,13 +121,19 @@ test('synthAll: 並列に合成してキャッシュし、2 回目は TTS を呼
   assert.deepEqual([...b[1]], [...a[1]]);
 });
 
-test('pickProvider: off / elevenlabs / system / auto の選び方とエラー', () => {
-  assert.equal(pickProvider('off', {}), null);
-  assert.throws(() => pickProvider('elevenlabs', {}), TtsError);
-  assert.equal(pickProvider('auto', { ELEVENLABS_API_KEY: 'k' }).name, 'elevenlabs');
-  assert.throws(() => pickProvider('system', {}, { platform: 'linux', which: () => false }), TtsError);
-  assert.equal(pickProvider('auto', {}, { platform: 'linux', which: () => false }), null, 'どれもなければ字幕だけ');
-  assert.equal(pickProvider('auto', {}, { platform: 'linux', which: (c) => c === 'espeak-ng' }).name, 'espeak-ng');
+test('pickProvider: offは字幕だけ。sayはmacOSでsayがあるときだけ使え、なければエラー', () => {
+  const cases = [
+    { name: 'off', req: ['off', { platform: 'linux', which: () => false }], want: null },
+    { name: 'macOSでsayがない', req: ['say', { platform: 'darwin', which: () => false }], wantErr: /macOSのsayが必要です/ },
+    { name: 'macOS以外', req: ['say', { platform: 'linux', which: () => true }], wantErr: /macOSのsayが必要です/ },
+  ];
+  for (const { name, req, want, wantErr } of cases) {
+    if (wantErr) {
+      assert.throws(() => pickProvider(...req), (e) => e instanceof TtsError && wantErr.test(e.message), name);
+      continue;
+    }
+    assert.equal(pickProvider(...req), want, name);
+  }
 });
 
 test('pickMacVoice: ja_JP の声を Kyoko → Eddy → Flo → Reed の順で選ぶ', () => {
@@ -140,11 +146,6 @@ test('pickMacVoice: ja_JP の声を Kyoko → Eddy → Flo → Reed の順で選
     { name: 'ja_JP がない', req: [line('Kyoko', 'en_US'), line('Samantha', 'en_US')], want: undefined },
   ];
   for (const { name, req, want } of cases) assert.equal(pickMacVoice(req.join('\n')), want, name);
-});
-
-test('pickProvider: espeak-ng は ja の声を使う', () => {
-  const p = pickProvider('system', {}, { platform: 'linux', which: (c) => c === 'espeak-ng' });
-  assert.equal(p.id, 'espeak-ng:ja');
 });
 
 // ── 描画 ──
@@ -272,8 +273,8 @@ test('findChrome: EXPLAIN_CHROME を優先する', () => {
 // ── 端から端まで：実際の OS の読み上げ + Chrome + ffmpeg。遅いので EXPLAIN_E2E=1 のときだけ動かす。──
 const E2E = process.env.EXPLAIN_E2E === '1';
 
-test('e2e: OS の読み上げで実際の音声を合成する', { skip: !E2E }, async () => {
-  const p = pickProvider('system', process.env);
+test('e2e: macOSのsayで実際の音声を合成する', { skip: !E2E }, async () => {
+  const p = pickProvider('say');
   const [clip] = await synthAll(['こんにちは、世界。'], p, {});
   assert.ok(clip.length / SAMPLE_RATE > 0.4);
 });

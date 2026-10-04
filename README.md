@@ -19,7 +19,7 @@ explain render examples/pr-before-after.md          # build an explainer page an
 explain render examples/pr-before-after.md --static # build HTML without <script>
 explain render examples/pr-before-after.md --watch  # serve the page and rebuild/reload on every save
 explain lint   examples/pr-before-after.md          # run the STE check only
-explain video  script.md --voice system             # build a video player page (add --mp4 for an MP4 file)
+explain video  script.md                            # build a video player page (add --mp4 for an MP4 file)
 explain help format                                 # script format
 explain list                                        # list components and themes
 explain config                                      # show and change settings
@@ -28,7 +28,7 @@ explain cache [clear]                               # show (or clear) the narrat
 
 - Output goes to `~/.explain-cli/pages/` and `~/.explain-cli/videos/`; settings live in `~/.explain-cli/config.json`. Set `EXPLAIN_HOME` to change the location.
 - `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 22.13 or later.
-- Video narration uses ElevenLabs (`ELEVENLABS_API_KEY`) first, then macOS `say` (a Japanese voice such as Kyoko), then `espeak-ng` on Linux.
+- Video narration is synthesized only with macOS `say`, using a Japanese voice (Kyoko, Eddy, Flo, or Reed, in that order). No external TTS service or API key is used. On other platforms, use `--voice off` for a subtitles-only video.
 
 ## Rewriting AI-style Japanese
 
