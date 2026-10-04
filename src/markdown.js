@@ -27,10 +27,12 @@ function decorate(html) {
     .replace(CELL_STATUS, (_, attrs, word, label = '') => `<td${attrs}>${statusHtml(word, label)}</td>`);
 }
 
+/** @returns {string} */
 export function md(text) {
   return decorate(marked.parse(String(text ?? '')));
 }
 
+/** @returns {string} */
 export function mdInline(text) {
-  return marked.parseInline(String(text ?? ''));
+  return /** @type {string} */ (marked.parseInline(String(text ?? '')));
 }

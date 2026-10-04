@@ -9,7 +9,7 @@ export const LIMITS = Object.freeze({ procedural: 35, descriptive: 45 });
 export const MAX_SENTENCES = 6;
 const NO_CHAIN_MIN = 3; // 「の」が 3 回（A の B の C の D）以上で警告する
 
-const PUNCT = /[，。！？；：、（）「」『』“”‘’《》【】・…〜　]/;
+const PUNCT = /[，。！？；：、（）「」『』“”‘’《》【】・…〜\u3000]/;
 const WORD = /[A-Za-z0-9_][\w'’./-]*/g;
 // 名詞句の 1 要素：空白・句読点・括弧・主な助詞を含まない文字の並び。
 const ELEMENT = '[^\\s、。，．！？「」『』（）()\\[\\]・:：,.をはがにでへもやとの]+';

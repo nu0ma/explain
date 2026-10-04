@@ -34,6 +34,11 @@ const PANEL_ID = /^([A-Z][0-9]?)\s+(.+)$/;
 const ATTR_TOKEN = /([\w-]+)(?:=("[^"]*"|'[^']*'|\S+))?/g;
 
 // コマンドラインの引数で meta を上書きする。undefined のキーは飛ばし、選択肢のあるキーは値を確かめる。
+/**
+ * @param {Record<string, any>} meta
+ * @param {Record<string, any>} overrides
+ * @param {Readonly<Record<string, readonly string[]>>} [allowed]
+ */
 export function applyOverrides(meta, overrides, allowed = CHOICES) {
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) continue;

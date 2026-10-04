@@ -14,6 +14,7 @@ export class ConfigError extends Error {
   }
 }
 
+/** @type {Readonly<Record<string, { type: 'bool' | 'enum', choices?: readonly string[], default: string | boolean, label: string }>>} */
 export const CONFIG_KEYS = Object.freeze({
   open: { type: 'bool', default: true, label: '生成後にブラウザでページを開く' },
   theme: { type: 'enum', choices: CHOICES.theme, default: 'blueprint', label: '既定のテーマ' },

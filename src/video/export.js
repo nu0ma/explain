@@ -38,6 +38,18 @@ export function findChrome(env = process.env, platform = process.platform) {
 
 // render(t) は決定的なので、同じページを concurrency 枚のタブで開き、フレームを分けて並列に撮る。
 // deps でブラウザと ffmpeg の起動を差し替えられる（テスト用）。
+/**
+ * @typedef {{ cdp: Awaited<ReturnType<typeof connect>>, stop: () => Promise<void> }} Browser
+ * @param {string} htmlFile
+ * @param {string} mp4File
+ * @param {{
+ *   wav?: Buffer | null, env?: NodeJS.ProcessEnv, onProgress?: (done: number, total: number) => void, concurrency?: number,
+ *   deps?: {
+ *     has?: (cmd: string) => boolean, find?: (env: NodeJS.ProcessEnv) => string | null,
+ *     launch?: (chromePath: string, profileDir: string) => Promise<Browser>, encoder?: (args: string[]) => import('node:child_process').ChildProcessWithoutNullStreams,
+ *   },
+ * }} [options]
+ */
 export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onProgress = () => {}, concurrency = Math.min(4, availableParallelism()), deps = {} } = {}) {
   const { has = hasCommand, find = findChrome, launch = launchChrome, encoder = spawnFfmpeg } = deps;
   if (!has('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
@@ -66,10 +78,10 @@ export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onP
     let ffErr = '';
     ffmpeg.stderr.on('data', (d) => { ffErr += d; });
     // ffmpeg が途中で落ちたら、フレームを書き込んでいる最中でも失敗として扱う。
-    const done = new Promise((resolve, reject) => {
+    const done = /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
       ffmpeg.on('error', (e) => reject(new ExportError(`ffmpeg を起動できません：${e.message}`)));
       ffmpeg.on('close', (code) => (code === 0 ? resolve() : reject(new ExportError(`ffmpeg が失敗しました（${code}）：${ffErr.slice(0, 300)}`))));
-    });
+    }));
     done.catch(() => {});
     const write = (buf) => (ffmpeg.stdin.write(buf) ? null : Promise.race([new Promise((r) => ffmpeg.stdin.once('drain', r)), done]));
 
@@ -139,12 +151,12 @@ async function launchChrome(chromePath, profileDir) {
     '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
     '--force-device-scale-factor=1', '--window-size=1920,1080', 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
-  const stop = () => new Promise((r) => {
+  const stop = () => /** @type {Promise<void>} */ (new Promise((r) => {
     if (chrome.exitCode !== null) return r();
     const timer = setTimeout(r, 3000);
     chrome.once('exit', () => { clearTimeout(timer); r(); });
     chrome.kill();
-  });
+  }));
   let cdp;
   try {
     cdp = await connect(await devtoolsUrl(chrome));
@@ -173,6 +185,11 @@ function devtoolsUrl(chrome) {
 
 // 最小限の CDP クライアント：要求と応答は id で対応づけ、イベントはセッションとメソッド名の組で 1 回だけ待つ。
 // 接続が切れたら（Chrome が落ちたときなど）、応答を待っている要求とイベントをすべて失敗させる。
+/**
+ * @param {string} url
+ * @param {{ WebSocketImpl?: new (url: string) => WebSocket }} [options]
+ * @returns {Promise<{ send: (method: string, params?: object, sessionId?: string) => Promise<any>, once: (method: string, sessionId?: string) => Promise<any>, close: () => void }>}
+ */
 export function connect(url, { WebSocketImpl = globalThis.WebSocket } = {}) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocketImpl(url);

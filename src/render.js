@@ -11,6 +11,7 @@ import { VERSION, RUNTIME_JS } from './assets.js';
 import { timestamp } from './time.js';
 
 export class RenderError extends Error {
+  /** @param {string} message @param {{ line?: number, component?: string, example?: string }} [info] */
   constructor(message, { line, component, example } = {}) {
     super(message);
     this.name = 'RenderError';

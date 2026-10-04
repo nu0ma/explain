@@ -15,6 +15,14 @@ export const VIDEO_UI = Object.freeze({ play: '再生', pause: '一時停止', c
 
 // provider が null なら字幕だけを出し、長さは文字数から見積もる。
 // encodeAudio(wav) は埋め込む音声を { mime, data } に変える（null を返せば WAV のまま）。省略すると WAV を埋め込む。
+/**
+ * @param {string} source
+ * @param {{
+ *   provider?: { name: string, id: string, concurrency?: number, synth: (text: string) => Promise<Int16Array> } | null,
+ *   cacheDir?: string, defaults?: object, overrides?: object, onProgress?: (msg: string) => void,
+ *   encodeAudio?: ((wav: Buffer) => Promise<{ mime: string, data: Buffer } | null>) | null,
+ * }} [options]
+ */
 export async function renderVideo(source, { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null } = {}) {
   const video = parseVideo(source, { defaults });
   const { meta } = video;

@@ -12,5 +12,9 @@ export { ComponentError } from './error.js';
 
 const ALL = [callout, kv, timeline, annot, tree, limits, sequence, flow];
 
+/**
+ * @typedef {{ name: string, summary: string, syntax: string, example: string, render: (text: string, ctx: { args: string, uid: () => string }) => string }} Component
+ * @type {Map<string, Component>}
+ */
 export const COMPONENTS = new Map(ALL.map((c) => [c.name, c]));
 export const RAW_LANGS = new Set(['html', 'svg']);

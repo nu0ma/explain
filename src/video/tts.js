@@ -106,13 +106,13 @@ export function hasCommand(cmd) {
 }
 
 function run(cmd, args) {
-  return new Promise((resolve, reject) => {
+  return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     p.stderr.on('data', (d) => { err += d; });
     p.on('error', reject);
     p.on('close', (code) => (code === 0 ? resolve() : reject(new TtsError(`${cmd} が失敗しました（${code}）：${err.slice(0, 200)}`))));
-  });
+  }));
 }
 
 async function withTemp(fn) {
@@ -161,6 +161,11 @@ function resample(input) {
 }
 
 // すべてのナレーションを合成する（キャッシュと並列数の上限つき）。texts と同じ長さの Int16Array の配列を返す。
+/**
+ * @param {string[]} texts
+ * @param {{ id: string, concurrency?: number, synth: (text: string) => Promise<Int16Array> }} provider
+ * @param {{ cacheDir?: string }} [options]
+ */
 export async function synthAll(texts, provider, { cacheDir } = {}) {
   if (cacheDir) mkdirSync(cacheDir, { recursive: true });
   const results = new Array(texts.length);
