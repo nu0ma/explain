@@ -1,7 +1,6 @@
 // --mp4: drives the local Chrome (headless, over the Chrome DevTools Protocol) to call the player's render(t) per frame and take screenshots,
 // then encodes them to H.264 with ffmpeg together with the narration audio. Playwright and Puppeteer are not used.
 import { spawn } from 'node:child_process';
-import type { ChildProcessByStdio } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, availableParallelism } from 'node:os';
 import { join } from 'node:path';
@@ -93,7 +92,7 @@ interface Pending {
   fail: (err: Error) => void;
 }
 
-// The socket API that connect uses. The global WebSocket satisfies it.
+// The socket API that connect uses. PipeSocket implements it, and tests can fake it.
 export interface CdpSocket {
   addEventListener(type: 'open' | 'close' | 'error' | 'message', listener: (ev: Event) => void): void;
   send(data: string): void;
@@ -226,22 +225,29 @@ function spawnFfmpeg(args: string[]): EncoderProcess {
   return spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
 }
 
-// Launches headless Chrome and connects over CDP. stop() terminates Chrome and waits up to 3 seconds for it to exit.
+// Launches headless Chrome and talks CDP over a pipe (fds 3 and 4), so no DevTools port is opened for other local processes.
+// stop() terminates Chrome and waits up to 3 seconds for it to exit, then kills it outright.
 export async function launchChrome(chromePath: string, profileDir: string): Promise<Browser> {
   const chrome = spawn(chromePath, [
-    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`,
+    '--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`,
     '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
     '--force-device-scale-factor=1', '--window-size=1920,1080', 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
   const stop = () => new Promise<void>((r) => {
-    if (chrome.exitCode !== null) return r();
-    const timer = setTimeout(r, 3000);
+    if (chrome.exitCode !== null || chrome.signalCode !== null) return r();
+    const timer = setTimeout(() => { chrome.kill('SIGKILL'); r(); }, 3000);
     chrome.once('exit', () => { clearTimeout(timer); r(); });
     chrome.kill();
   });
+  // Chrome reads commands from fd 3 and writes responses to fd 4.
+  const socket = new PipeSocket(chrome.stdio[3] as Writable, chrome.stdio[4] as Readable);
+  chrome.once('error', (e) => socket.fail(new ExportError(`Chrome を起動できません：${e.message}`)));
+  chrome.once('exit', () => socket.fail(new ExportError('Chrome が終了しました')));
   let cdp: CdpClient;
   try {
-    cdp = await connect(await devtoolsUrl(chrome));
+    cdp = await connect(socket);
+    // The first command also checks that Chrome started.
+    await cdp.send('Target.getTargets');
   } catch (e) {
     await stop();
     throw e;
@@ -249,27 +255,61 @@ export async function launchChrome(chromePath: string, profileDir: string): Prom
   return { cdp, stop: async () => { cdp.close(); await stop(); } };
 }
 
-function devtoolsUrl(chrome: ChildProcessByStdio<null, null, Readable>): Promise<string> {
-  return new Promise((resolve, reject) => {
+// An 'error' event that carries the cause. Node 22 has no global ErrorEvent.
+class SocketErrorEvent extends Event {
+  error: Error;
+  constructor(error: Error) {
+    super('error');
+    this.error = error;
+  }
+}
+
+// CdpSocket over Chrome's --remote-debugging-pipe: each message is JSON terminated by a NUL byte.
+class PipeSocket extends EventTarget implements CdpSocket {
+  #out: Writable;
+  #failed = false;
+  constructor(out: Writable, input: Readable) {
+    super();
+    this.#out = out;
     let buf = '';
-    const timer = setTimeout(() => reject(new ExportError('Chrome の起動がタイムアウトしました')), 20000);
-    chrome.on('error', (e) => { clearTimeout(timer); reject(new ExportError(`Chrome を起動できません：${e.message}`)); });
-    chrome.stderr.on('data', (d: Buffer) => {
-      buf += d;
-      const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (m) {
-        clearTimeout(timer);
-        resolve(m[1]);
+    input.setEncoding('utf8');
+    input.on('data', (chunk: string) => {
+      buf += chunk;
+      let end;
+      while ((end = buf.indexOf('\0')) !== -1) {
+        this.dispatchEvent(new MessageEvent('message', { data: buf.slice(0, end) }));
+        buf = buf.slice(end + 1);
       }
     });
-  });
+    input.on('close', () => this.fail(new ExportError('Chrome DevTools との接続が切れました')));
+    input.on('error', () => this.fail(new ExportError('Chrome DevTools との接続でエラーが起きました')));
+    out.on('error', () => this.fail(new ExportError('Chrome DevTools との接続でエラーが起きました')));
+    setImmediate(() => this.dispatchEvent(new Event('open')));
+  }
+
+  send(data: string): void {
+    this.#out.write(`${data}\0`);
+  }
+
+  close(): void {
+    this.#out.end();
+  }
+
+  fail(err: Error): void {
+    if (this.#failed) return;
+    this.#failed = true;
+    this.dispatchEvent(new SocketErrorEvent(err));
+  }
 }
+
+// Long enough for a slow page load or font loading; short enough that a page stuck in a script loop does not hang the CLI.
+export const CDP_TIMEOUT_MS = 30000;
 
 // Minimal CDP client: requests and responses are matched by id, and events are awaited once per (session, method) pair.
 // When the connection drops (for example, when Chrome crashes), all pending requests and event waits fail.
-export function connect(url: string, { WebSocketImpl = globalThis.WebSocket }: { WebSocketImpl?: new (url: string) => CdpSocket } = {}): Promise<CdpClient> {
+// A request or event wait that gets no answer within timeoutMs fails, which also covers a page whose script never returns.
+export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<CdpClient> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocketImpl(url);
     const pending = new Map<number, Pending>();
     const waiters = new Map<string, Pending>();
     let id = 0;
@@ -283,9 +323,22 @@ export function connect(url: string, { WebSocketImpl = globalThis.WebSocket }: {
       waiters.clear();
       reject(err);
     };
-    ws.addEventListener('error', () => failAll(new ExportError('Chrome DevTools との接続でエラーが起きました')));
-    ws.addEventListener('close', () => failAll(new ExportError('Chrome DevTools との接続が切れました')));
-    ws.addEventListener('message', (ev) => {
+    // Registers a request or event wait that fails after timeoutMs.
+    const track = <K>(map: Map<K, Pending>, key: K, what: string) => new Promise<unknown>((ok, fail) => {
+      const timer = setTimeout(() => {
+        map.delete(key);
+        fail(new ExportError(`Chrome が ${timeoutMs / 1000} 秒以内に応答しません（${what}）`));
+      }, timeoutMs);
+      map.set(key, {
+        ok: (v) => { clearTimeout(timer); ok(v); },
+        fail: (e) => { clearTimeout(timer); fail(e); },
+      });
+    });
+    socket.addEventListener('error', (ev) => {
+      failAll(ev instanceof SocketErrorEvent ? ev.error : new ExportError('Chrome DevTools との接続でエラーが起きました'));
+    });
+    socket.addEventListener('close', () => failAll(new ExportError('Chrome DevTools との接続が切れました')));
+    socket.addEventListener('message', (ev) => {
       const msg: CdpMessage = JSON.parse((ev as MessageEvent<string>).data);
       const request = msg.id ? pending.get(msg.id) : undefined;
       if (msg.id && request) {
@@ -298,19 +351,18 @@ export function connect(url: string, { WebSocketImpl = globalThis.WebSocket }: {
         waiters.delete(key);
       }
     });
-    ws.addEventListener('open', () => resolve({
+    socket.addEventListener('open', () => resolve({
       send(method, params = {}, sessionId) {
         if (closed) return Promise.reject(closed);
-        return new Promise((ok, fail) => {
-          pending.set(++id, { ok, fail });
-          ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-        });
+        const result = track(pending, ++id, method);
+        socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+        return result;
       },
       once(method, sessionId) {
         if (closed) return Promise.reject(closed);
-        return new Promise((ok, fail) => waiters.set(`${sessionId ?? ''}:${method}`, { ok, fail }));
+        return track(waiters, `${sessionId ?? ''}:${method}`, method);
       },
-      close: () => ws.close(),
+      close: () => socket.close(),
     }));
   });
 }

@@ -148,7 +148,7 @@ function lastSocket(): FakeSocket {
 }
 
 test('connect: 応答を id で対応づけ、イベントを 1 回だけ待つ', async () => {
-  const cdp = await connect('ws://x', { WebSocketImpl: FakeSocket });
+  const cdp = await connect(new FakeSocket('x'));
   const ws = lastSocket();
   const res = cdp.send('Page.enable', {}, 's1');
   const ev = cdp.once('Page.loadEventFired');
@@ -171,11 +171,17 @@ test('connect: 応答を id で対応づけ、イベントを 1 回だけ待つ'
 });
 
 test('connect: 接続が切れたら、待っている要求とイベントを失敗させ、以後の要求もすぐ失敗させる', async () => {
-  const cdp = await connect('ws://x', { WebSocketImpl: FakeSocket });
+  const cdp = await connect(new FakeSocket('x'));
   const res = cdp.send('Runtime.evaluate');
   const ev = cdp.once('Page.loadEventFired');
   lastSocket().close();
   await assert.rejects(res, /接続が切れました/);
   await assert.rejects(ev, /接続が切れました/);
   await assert.rejects(cdp.send('Page.enable'), /接続が切れました/);
+});
+
+test('connect: 応答やイベントが時間内に来なければ失敗させる', async () => {
+  const cdp = await connect(new FakeSocket('x'), { timeoutMs: 20 });
+  await assert.rejects(cdp.send('Runtime.evaluate'), /Chrome が 0.02 秒以内に応答しません（Runtime.evaluate）/);
+  await assert.rejects(cdp.once('Page.loadEventFired'), /Chrome が 0.02 秒以内に応答しません（Page.loadEventFired）/);
 });
