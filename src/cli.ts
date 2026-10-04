@@ -103,12 +103,17 @@ source: example.com    # そのほかのキーはページ上部のメタ情報�
 A -> B
 \`\`\`
 
-\`\`\`html             ← html / svg のコードブロックはそのまま埋め込む（逃げ道）
-<div>任意の内容</div>
+\`\`\`svg              ← html / svg のコードブロックはそのまま埋め込む。部品で表せない図はここに書く
+<svg viewBox="0 0 320 60"><g data-key="待機" data-step="1"><rect x="10" y="10" width="90" height="40" fill="var(--fill)" stroke="var(--ink)"/><text x="55" y="35" text-anchor="middle" fill="var(--ink)">待機</text></g></svg>
 \`\`\`
 
 - "## " でパネルを始める。英字の ID は省略できる（A、B、C… を自動で振る）。span でパネルを複数列に広げる。
-- 部品の一覧は explain list、各部品の書き方は explain help <部品名>。`;
+- 部品の一覧は explain list、各部品の書き方は explain help <部品名>。
+- html / svg ブロックの色は、テーマの CSS 変数で書くと明暗とテーマの切り替えに追従する。
+  --ink --ink-2 --ink-3（文字）、--line --line-2（線）、--paper --fill --bg（背景）、--accent、--add、--warn、--err、--ok（とそれぞれの -bg）、--font-sans、--font-mono。
+- 動画では、html / svg の要素に data-step="N" を付けると N の小さい順に現れる。data-step のない要素は最初から出る。
+  data-key="名前" を付けると、ナレーションの [名前] でカメラが寄り、となりの場面の同じ名前の要素へなめらかに動く。
+- --static では、html / svg に <script>、on〜 属性、javascript: を書けない。`;
 
 const VIDEO_FORMAT = `動画の原稿の書式（explain video）
 
@@ -136,6 +141,7 @@ Client -> Server: ACK
   ナレーションが手順より多いときは、余った先頭の文を前置きとして使い、新しい内容は出さない。
 - ナレーションに [名前] と書くと、カメラが同じ名前の要素に寄って強調し、字幕のその語が黄色になる。
 - となりあう場面に同じ名前のノードや参加者があると、前の位置から次の位置へなめらかに動く（場面をまたぐ変形）。
+- 部品で表せない図は html / svg ブロックで書く。要素に data-step="N" を付けると手順になり、data-key="名前" を付けると [名前] のカメラと場面をまたぐ変形の対象になる（explain help format）。
 - 音声：--voice say（既定。macOSのsayで読み上げる。日本語の声はKyoko、Eddy、Flo、Reedの順に探す）| off（字幕だけ）。
 - 出力先は ~/.explain-cli/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg が必要）。
 - ffmpeg があれば、再生ページに埋め込む音声を AAC に圧縮する（なければ WAV のまま）。
@@ -481,7 +487,7 @@ function cmdList(print: Print): void {
   for (const [name, t] of Object.entries(THEMES)) print(`  ${name.padEnd(10)}${t.label}`);
   print('\n部品（コードブロックの言語名）:');
   for (const c of COMPONENTS.values()) print(`  ${c.name.padEnd(10)}${c.summary}`);
-  print('  html/svg  そのまま埋め込む（逃げ道）');
+  print('  html/svg  部品で表せない図を自分で書く（explain help format）');
   print('\n部品の書き方：explain help <部品名>　原稿の書式：explain help format');
 }
 
