@@ -1,15 +1,15 @@
 {
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
     "noEmit": true,
-    "target": "es2023",
+    "target": "es2024",
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "types": ["node"],
-    "strict": false,
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.js", "bin/**/*.js", "scripts/**/*.mjs"],
-  "exclude": ["src/runtime/**"]
+  "include": ["src/**/*.ts", "bin/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
 }

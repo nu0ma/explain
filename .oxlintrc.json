@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["dist/", "coverage/", "apm_modules/", ".claude/"],
+  "categories": { "correctness": "error" },
+  "env": { "node": true, "es2024": true },
+  "rules": {
+    "no-unused-vars": ["error", { "ignoreRestSiblings": true }]
+  },
+  "overrides": [
+    {
+      "files": ["src/runtime/**/*.js"],
+      "env": { "node": false, "browser": true }
+    }
+  ]
+}
