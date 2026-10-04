@@ -2,8 +2,9 @@
 
 # explain
 
-Instant explainer pages and narrated videos for Claude Code.<br>
-Say 「図にして」 and get a diagram. Say 「動画で説明して」 and get a narrated video.
+Your agent understands the code. Now let it show you.
+
+Turn PRs, architectures, and incidents into diagrams and narrated walkthroughs—with automatic layout, synchronized narration, and visual feedback.
 
 ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)
 ![Node 24.21+](https://img.shields.io/badge/node-24.21%2B-5FA04E)
