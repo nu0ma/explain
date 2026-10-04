@@ -64,14 +64,14 @@
     const beats = segs[i].beats;
     const S = groups.length;
     const B = beats.length;
+    const beatOf = assignSteps(beats, S);
     const perBeat = new Map();
     groups.forEach((g, gi) => {
-      // With more narration than steps, the extra sentences become a preamble and the steps align with the last sentences.
-      const b = S <= B ? gi + (B - S) : Math.floor((gi * B) / S);
+      const b = beatOf[gi];
       const rank = perBeat.get(b) ?? 0;
       perBeat.set(b, rank + 1);
       const beat = beats[b];
-      const count = S <= B ? 1 : Math.ceil(S / B) || 1;
+      const count = beats.some((bt) => bt.reveal != null) ? beatOf.filter((x) => x === b).length : S <= B ? 1 : Math.ceil(S / B) || 1;
       const slot = Math.min(0.45, (beat.end - beat.start) / count);
       for (const el of g) {
         const paths = (el.matches('path.am-edge') ? [el] : [...el.querySelectorAll('path.am-edge')])
@@ -81,6 +81,21 @@
       }
     });
   });
+
+  // Which beat reveals each step. When any beat has "(+N)", beats reveal N steps in order (1 when unmarked) and leftover steps go to the last beat.
+  // Otherwise the steps spread over the narration; with more narration than steps, the extra sentences become a preamble.
+  function assignSteps(beats, S) {
+    const B = beats.length;
+    if (!beats.some((bt) => bt.reveal != null)) {
+      return Array.from({ length: S }, (_, gi) => (S <= B ? gi + (B - S) : Math.floor((gi * B) / S)));
+    }
+    const out = [];
+    beats.forEach((bt, b) => {
+      for (let n = bt.reveal ?? 1; n > 0 && out.length < S; n--) out.push(b);
+    });
+    while (out.length < S) out.push(B - 1);
+    return out;
+  }
 
   // ── 3. Cross-scene morph: elements with the same name (data-key) in adjacent scenes ──
   const morphs = [];  // { scene, from, to, ghost, a, b }
@@ -349,6 +364,8 @@
   window.__amv = {
     duration: D.duration,
     fps: D.fps,
+    // When each step appears, for checking the timing from outside the page.
+    steps: () => items.map((it) => ({ scene: it.scene, at: it.at })),
     exportMode() {
       root.setAttribute('data-export', '');
       // Pin auto to light so the output does not depend on the exporting machine's color scheme.

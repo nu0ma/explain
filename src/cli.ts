@@ -17,6 +17,7 @@ import { serveWatch } from './watch.ts';
 import { fileStamp, clock } from './time.ts';
 import { pickProvider, compressAudio, cacheStats, CACHE_MAX_BYTES, TtsError, VOICES } from './video/tts.ts';
 import { exportMp4, ExportError } from './video/export.ts';
+import { snapshot, type LayoutIssue } from './snapshot.ts';
 import { explainHome, readConfig, setConfig, resetConfig, isConfigKey, CONFIG_KEYS, ConfigError, type ConfigValues } from './config.ts';
 
 const MAX_LISTED_WARNINGS = 20;
@@ -38,6 +39,8 @@ export type MainIO = {
   // Replaces the TTS provider chosen from --voice (null means captions only).
   ttsProvider?: TtsProvider;
   encodeAudio?: EncodeAudio | null;
+  // Replaces the Chrome-based layout check and screenshot of render --png.
+  inspect?: typeof snapshot;
 };
 
 export type CliOptions = {
@@ -52,6 +55,8 @@ export type CliOptions = {
   mode?: string;
   voice?: string;
   mp4?: boolean;
+  png?: boolean;
+  report?: string;
   help?: boolean;
   version?: boolean;
 };
@@ -63,6 +68,7 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
 使い方:
   explain render <file|->  [-o 出力先] [--no-open] [--static] [--watch] [--theme blueprint|shadcn]
                            [--template sheet|doc] [--style off|80|strict] [--mode auto|light|dark]
+                           [--png] [--report json]
                                                      解説ページ（HTML）を作る。--watch は保存するたびに作り直してブラウザを再読み込みする
   explain video  <file|->  [-o 出力先] [--voice say|off] [--mp4] [--no-open]
                            [--theme blueprint|shadcn|3b1b] [--mode auto|light|dark]
@@ -78,6 +84,9 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
 - 出力先の既定は ~/.explain-cli/pages/ と ~/.explain-cli/videos/（環境変数 EXPLAIN_HOME で変更できる）。
 - --watch はローカルのサーバーからページを配信し、原稿を保存するたびに作り直す（Ctrl+C で終了）。-o を渡すとファイルにも書く。
 - --static は <script> を含まない HTML を出す（切り替えボタンと原稿コピーなし。配色は OS の設定に従う）。
+- --png は Chrome でページを開き、ページ全体の画像を HTML と同じ名前の .png に保存する。あわせてレイアウトを検査し、
+  パネルからのはみ出し、図の外に出た文字、重なった文字を出す。
+- --report json は結果を JSON で標準出力に出す（エージェント向け）。ブラウザは --open を付けたときだけ開く。
 - ブラウザを自動で開くか、既定のテーマなどは explain config で設定する。--open / --no-open はその回だけ有効。`;
 
 const FORMAT = `原稿の書式（拡張 Markdown）
@@ -139,6 +148,10 @@ Client -> Server: ACK
 - N 番目のナレーションが流れるときに、画面の N 番目の手順が現れる。flow / sequence / tree はソースの 1 行が 1 手順。
   timeline、limits、表の行、リスト項目、段落は項目ごとに自動で分ける。手順がナレーションより多いときは各文に均等に割り振る。
   ナレーションが手順より多いときは、余った先頭の文を前置きとして使い、新しい内容は出さない。
+- この割り振りは既定値で、原稿で上書きできる。
+  > (+2) 文      ← この文で手順を 2 つ出す。(+0) なら何も出さない。場面に 1 つでも (+N) があると、
+                   印のない文は手順を 1 つ出し、余った手順は最後の文で出す
+  > (pause 1.5s) ← 声も字幕もなしで 1.5 秒止める（(間 1.5秒) とも書ける。30 秒まで）。場面の最後に書くと、次の場面へ移る前に止める
 - ナレーションに [名前] と書くと、カメラが同じ名前の要素に寄って強調し、字幕のその語が黄色になる。
 - となりあう場面に同じ名前のノードや参加者があると、前の位置から次の位置へなめらかに動く（場面をまたぐ変形）。
 - 部品で表せない図は html / svg ブロックで書く。要素に data-step="N" を付けると手順になり、data-key="名前" を付けると [名前] のカメラと場面をまたぐ変形の対象になる（explain help format）。
@@ -171,6 +184,8 @@ export async function main(argv: string[], io: MainIO = {}): Promise<number> {
         mode: { type: 'string' },
         voice: { type: 'string' },
         mp4: { type: 'boolean' },
+        png: { type: 'boolean' },
+        report: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -187,8 +202,16 @@ export async function main(argv: string[], io: MainIO = {}): Promise<number> {
 
   switch (cmd) {
     case 'render':
+      if (opts.report !== undefined && opts.report !== 'json') {
+        fail(`✗ --report の値 "${opts.report}" は使えません。選択肢：json`);
+        return 2;
+      }
+      if (opts.watch && (opts.png || opts.report)) {
+        fail('✗ --watch と --png / --report は一緒に使えません');
+        return 2;
+      }
       if (opts.watch) return cmdWatch(arg, opts, { print, fail, env, cwd: io.cwd, signal: io.signal });
-      return withSource(arg, io, fail, (src) => cmdRender(src, opts, { print, fail, env, cwd: io.cwd }));
+      return withSource(arg, io, fail, (src) => cmdRender(src, opts, { print, fail, env, cwd: io.cwd, inspect: io.inspect }));
     case 'video':
       if (opts.static) {
         fail('✗ explain video では --static を使えません。動画の再生には JavaScript が必要です');
@@ -240,7 +263,8 @@ export function shouldOpen(opts: Pick<CliOptions, 'open' | 'no-open'>, env: Node
   return config.open !== false;
 }
 
-function cmdRender(src: string, opts: CliOptions, { print, fail, env, cwd }: Context): number {
+async function cmdRender(src: string, opts: CliOptions, { print, fail, env, cwd, inspect = snapshot }: Context & { inspect?: typeof snapshot }): Promise<number> {
+  const json = opts.report === 'json';
   const config = readConfig(env);
   if (config.warning) fail(`! ${config.warning}`);
   const { theme, mode, style } = config.values;
@@ -248,16 +272,67 @@ function cmdRender(src: string, opts: CliOptions, { print, fail, env, cwd }: Con
   try {
     result = renderDoc(src, { theme: opts.theme, template: opts.template, style: opts.style, mode: opts.mode, static: opts.static }, { theme, mode, style });
   } catch (e) {
+    if (json) return print(JSON.stringify({ ok: false, error: errorJson(e) }, null, 2)), 1;
     return reportError(e, fail);
   }
   const file = writeOutput(result.html, { dir: 'pages', title: result.meta.title, out: opts.out, env, cwd });
 
-  const comps = Object.entries(result.stats.components).map(([k, v]) => `${k}×${v}`).join(' ');
-  print(`✓ ${file}`);
-  print(`  ${result.meta.template} · ${result.meta.theme} · パネル ${result.stats.panels} 枚${comps ? ` · ${comps}` : ''}${result.static ? ' · 静的（script なし）' : ''}`);
-  printWarnings(result.warnings, print, result.meta.style);
-  if (shouldOpen(opts, env, config.values)) openFile(file);
-  return 0;
+  let png: string | null = null;
+  let layout: { issues: LayoutIssue[]; truncated: number } | null = null;
+  let snapError: string | null = null;
+  if (opts.png) {
+    png = file.replace(/\.html?$/i, '') + '.png';
+    try {
+      layout = await inspect(file, png, { env });
+    } catch (e) {
+      if (!(e instanceof ExportError)) throw e;
+      png = null;
+      snapError = e.message;
+    }
+  }
+
+  if (json) {
+    print(JSON.stringify({
+      ok: !snapError,
+      file,
+      png,
+      template: result.meta.template,
+      theme: result.meta.theme,
+      static: result.static,
+      panels: result.stats.panels,
+      components: result.stats.components,
+      warnings: result.warnings,
+      layout: layout && { issues: layout.issues, truncated: layout.truncated },
+      ...(snapError ? { error: { message: `画像を作れません：${snapError}` } } : {}),
+    }, null, 2));
+  } else {
+    const comps = Object.entries(result.stats.components).map(([k, v]) => `${k}×${v}`).join(' ');
+    print(`✓ ${file}`);
+    print(`  ${result.meta.template} · ${result.meta.theme} · パネル ${result.stats.panels} 枚${comps ? ` · ${comps}` : ''}${result.static ? ' · 静的（script なし）' : ''}`);
+    printWarnings(result.warnings, print, result.meta.style);
+    if (png && layout) {
+      print(`✓ ${png}`);
+      printLayout(layout, print);
+    }
+    if (snapError) fail(`✗ 画像を作れません：${snapError}。ページはできています`);
+  }
+  if (json ? opts.open : shouldOpen(opts, env, config.values)) openFile(file);
+  return snapError ? 1 : 0;
+}
+
+function printLayout({ issues, truncated }: { issues: LayoutIssue[]; truncated: number }, print: Print): void {
+  if (!issues.length) return print('  レイアウト ✓ 問題 0 件');
+  print(`  レイアウトの問題 ${issues.length + truncated} 件（原稿を直してから再実行してください）：`);
+  issues.forEach((i) => print(`  ${i.panel ? `[${i.panel}] ` : ''}${i.message}`));
+  if (truncated) print(`  … ほかに ${truncated} 件`);
+}
+
+// The error part of --report json. Mirrors reportError.
+function errorJson(e: unknown): Record<string, unknown> {
+  if (e instanceof RenderError) return { line: e.line, component: e.component, message: e.message, example: e.example ?? null };
+  if (e instanceof ParseError) return { line: e.line || null, message: e.message };
+  if (e instanceof LintError) return { message: e.message, warnings: e.warnings };
+  throw e;
 }
 
 // --watch accepts only a manuscript file. Errors do not stop it; fixing and saving rebuilds the page.

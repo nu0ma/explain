@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { get } from 'node:http';
 import { main, shouldOpen } from '../src/cli.ts';
+import { ExportError } from '../src/video/export.ts';
 import { findSimplified } from './helpers/chinese.ts';
 
 let dir: string;
@@ -266,4 +267,51 @@ test('cli render --watch: 配信し、保存すると作り直して再読み込
     ac.abort();
   }
   assert.equal(await done, 0);
+});
+
+test('cli render --report json: 結果を JSON で出し、--png ではレイアウトの検査と画像のパスを含める', async () => {
+  const issues = [{ kind: 'overlap' as const, panel: 'A', message: '文字「A」と「B」が重なっています' }];
+  let called: [string, string | null] | null = null;
+  const out = sink();
+  const err = sink();
+  const code = await main(['render', '-', '--png', '--report', 'json'], {
+    stdout: out.stream, stderr: err.stream, stdin: Readable.from([GOOD]), env: { EXPLAIN_NO_OPEN: '1', EXPLAIN_HOME: dir }, cwd: dir,
+    inspect: async (file, png) => { called = [file, png]; return { issues, truncated: 0 }; },
+  });
+  assert.equal(code, 0, err.text);
+  const r = JSON.parse(out.text);
+  assert.equal(r.ok, true);
+  assert.equal(r.png, r.file.replace(/\.html$/, '.png'));
+  assert.deepEqual(called, [r.file, r.png]);
+  assert.deepEqual(r.components, { flow: 1 });
+  assert.deepEqual(r.layout, { issues, truncated: 0 });
+  assert.deepEqual(r.warnings, []);
+});
+
+test('cli render --png: 画像のパスとレイアウトの問題を出す。Chrome がなければ 1 で、ページは残る', async () => {
+  const io = (inspect: NonNullable<Parameters<typeof main>[1]>['inspect']) => {
+    const out = sink();
+    const err = sink();
+    return { out, err, io: { stdout: out.stream, stderr: err.stream, stdin: Readable.from([GOOD]), env: { EXPLAIN_NO_OPEN: '1', EXPLAIN_HOME: dir }, cwd: dir, inspect } };
+  };
+  const ok = io(async () => ({ issues: [{ kind: 'overflow', panel: 'B', message: 'パネルの内容が幅を 10px はみ出しています' }], truncated: 2 }));
+  assert.equal(await main(['render', '-', '--png'], ok.io), 0);
+  assert.match(ok.out.text, /✓ .+\.png\n {2}レイアウトの問題 3 件.*\n {2}\[B\] パネルの内容が幅を 10px はみ出しています\n {2}… ほかに 2 件/);
+
+  const ng = io(async () => { throw new ExportError('Chrome / Chromium / Edge が見つかりません'); });
+  assert.equal(await main(['render', '-', '--png'], ng.io), 1);
+  assert.match(ng.out.text, /✓ .+\.html/);
+  assert.match(ng.err.text, /✗ 画像を作れません：Chrome/);
+});
+
+test('cli render --report json: 原稿のエラーも JSON で出す。--report の値と --watch との組み合わせを検査する', async () => {
+  const r = await run(['render', '-', '--report', 'json'], { stdin: '## A\n```flow\nA ->\n```\n' });
+  assert.equal(r.code, 1);
+  const j = JSON.parse(r.out);
+  assert.equal(j.ok, false);
+  assert.equal(j.error.component, 'flow');
+  assert.equal(j.error.line, 3);
+  assert.match(j.error.example, /```flow/);
+  assert.equal((await run(['render', '-', '--report', 'xml'], { stdin: GOOD })).code, 2);
+  assert.equal((await run(['render', 'a.md', '--watch', '--png'])).code, 2);
 });

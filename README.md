@@ -34,6 +34,8 @@ pnpm add --global "$PWD"      # installs the explain command (or run node bin/ex
 explain render script.md                            # build an explainer page and open it in the browser
 explain render script.md --static                   # build HTML without <script>
 explain render script.md --watch                    # serve the page and rebuild/reload on every save
+explain render script.md --png                      # also save a full-page PNG and report layout problems (needs Chrome)
+explain render script.md --png --report json        # print the result as JSON, for AI agents
 explain lint   script.md                            # run the STE check only
 explain video  script.md                            # build a video player page (add --mp4 for an MP4 file)
 explain help format                                 # script format

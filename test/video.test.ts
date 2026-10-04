@@ -92,6 +92,29 @@ test('buildTimeline: タイトル → 場面の切り替え → ナレーショ�
   assert.equal(noIntro.scenes[0].start, TIMING.title, 'タイトルのナレーションがなければ決まった時間だけ表示する');
 });
 
+test('parseVideo: (pause Ns) は次の拍の前の間になり、場面の最後なら場面の後ろの間になる。(+N) は出す手順の数', () => {
+  const v = parseVideo('> (pause 1s)\n> タイトル。\n> (間 0.5秒)\n## 場面\n```flow\nA -> B\n```\n> (pause 1.5s)\n> (+2) [A] が送る。\n> 次の文。\n> (pause 2s)\n> (pause 1s)\n');
+  assert.deepEqual(v.introBeats.map((b) => [b.text, b.before]), [['タイトル。', 1]]);
+  assert.equal(v.introAfter, 0.5);
+  assert.deepEqual(v.scenes[0].beats.map((b) => [b.raw, b.before, b.reveal, b.focus]), [['[A] が送る。', 1.5, 2, 'A'], ['次の文。', 0, null, null]]);
+  assert.equal(v.scenes[0].after, 3);
+});
+
+test('parseVideo: 間の長さが範囲の外、(+N) のあとに文がないときはエラー', () => {
+  assert.throws(() => parseVideo('## 場面\n> (pause 0s)\n> 文。\n'), (e) => e instanceof ParseError && /0 より長く 30 秒以下/.test(e.message));
+  assert.throws(() => parseVideo('## 場面\n> (pause 31s)\n> 文。\n'), (e) => e instanceof ParseError && /0 より長く 30 秒以下/.test(e.message));
+  assert.throws(() => parseVideo('## 場面\n> (+2)\n'), (e) => e instanceof ParseError && /\(\+N\) のあとにナレーションの文/.test(e.message));
+});
+
+test('buildTimeline: 書いた間の分だけ拍と場面の終わりが後ろにずれ、reveal を拍に渡す', () => {
+  const v = parseVideo('## 場面\n> (pause 1s)\n> (+2) 一つ目。\n> (pause 2s)\n> 二つ目。\n> (pause 0.5s)\n');
+  const tl = buildTimeline(v, [1, 1]);
+  const [a, b] = tl.scenes[0].beats;
+  // title 2.4 + transition 0.9 + pause 1 = 4.3; 5.3 + gap 0.35 + pause 2 = 7.65; 8.65 + tail 0.8 + pause 0.5 = 9.95
+  assert.deepEqual([a.start, b.start, tl.scenes[0].end], [4.3, 7.65, 9.95]);
+  assert.deepEqual([a.reveal, b.reveal], [2, null]);
+});
+
 test('captionHtml: HTML をエスケープし、[名前] を強調語にする', () => {
   assert.equal(captionHtml('[Server] が <ACK> を返す'), '<b>Server</b> が &lt;ACK&gt; を返す');
 });

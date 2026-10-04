@@ -39,7 +39,7 @@ interface PlayerSegment {
   start: number;
   end: number;
   title: string | undefined;
-  beats: { text: string; focus: string | null; start: number; end: number; html: string }[];
+  beats: { text: string; focus: string | null; reveal: number | null; start: number; end: number; html: string }[];
 }
 
 interface PlayerData {

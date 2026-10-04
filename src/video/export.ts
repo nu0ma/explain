@@ -65,7 +65,7 @@ interface CdpCommands {
   'Page.enable': { params: Record<string, never>; result: unknown };
   'Page.navigate': { params: { url: string }; result: unknown };
   'Page.captureScreenshot': {
-    params: { format: 'jpeg'; quality: number; clip: { x: number; y: number; width: number; height: number; scale: number } };
+    params: { format: 'jpeg' | 'png'; quality?: number; captureBeyondViewport?: boolean; clip: { x: number; y: number; width: number; height: number; scale: number } };
     result: { data: string };
   };
   'Runtime.evaluate': {
@@ -74,7 +74,7 @@ interface CdpCommands {
   };
 }
 
-interface Page {
+export interface Page {
   send<M extends keyof CdpCommands>(method: M, params?: CdpCommands[M]['params']): Promise<CdpCommands[M]['result']>;
   evaluate(expression: string): Promise<unknown>;
 }
@@ -201,14 +201,14 @@ export async function exportMp4(
   }
 }
 
-// Opens the player page in a new tab and waits for it to load. send and evaluate target that tab.
-async function openPage(cdp: CdpClient, htmlFile: string): Promise<Page> {
+// Opens a page in a new tab and waits for it to load. send and evaluate target that tab.
+export async function openPage(cdp: CdpClient, htmlFile: string, { width = 1920, height = 1080 }: { width?: number; height?: number } = {}): Promise<Page> {
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string };
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string };
   // The result shapes come from the CDP specification for each command.
   const send = <M extends keyof CdpCommands>(method: M, params?: CdpCommands[M]['params']) =>
     cdp.send(method, params, sessionId) as Promise<CdpCommands[M]['result']>;
-  await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await send('Page.enable');
   const loaded = cdp.once('Page.loadEventFired', sessionId);
   loaded.catch(() => {}); // Do not leave an unhandled rejection when something fails before the load.
@@ -216,7 +216,7 @@ async function openPage(cdp: CdpClient, htmlFile: string): Promise<Page> {
   await loaded;
   const evaluate = async (expression: string) => {
     const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (r.exceptionDetails) throw new ExportError(`再生ページのスクリプトでエラーが起きました：${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
+    if (r.exceptionDetails) throw new ExportError(`ページのスクリプトでエラーが起きました：${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
     return r.result.value;
   };
   return { send, evaluate };
@@ -227,7 +227,7 @@ function spawnFfmpeg(args: string[]): EncoderProcess {
 }
 
 // Launches headless Chrome and connects over CDP. stop() terminates Chrome and waits up to 3 seconds for it to exit.
-async function launchChrome(chromePath: string, profileDir: string): Promise<Browser> {
+export async function launchChrome(chromePath: string, profileDir: string): Promise<Browser> {
   const chrome = spawn(chromePath, [
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`,
     '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
