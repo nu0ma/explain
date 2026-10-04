@@ -414,3 +414,18 @@ test('e2e: sayは「-」で始まる文もオプションではなく読み上�
   assert.ok(clip.length > 0);
   assert.equal(existsSync(out), false, '文で指定した場所にファイルを書かない');
 });
+
+test('renderVideo: flow IDs survive renamed labels across scenes and distinguish duplicate labels', async () => {
+  const src = '## Before\n```flow\n@api[Old API] -> @peer[Old API]\n```\n> [api] sends a request.\n## After\n```flow\n@api[New API] -> @peer[New API]\n```\n> [api] sends another request.\n';
+  const { html } = await renderVideo(src);
+  const scenes = [...html.matchAll(/<section class="amv-scene[\s\S]*?<\/section>/g)].map((m) => m[0]);
+  assert.equal(scenes.length, 3);
+  for (const [i, label] of ['Old API', 'New API'].entries()) {
+    assert.deepEqual([...scenes[i + 1].matchAll(/data-key="([^"]+)"/g)].map((m) => m[1]), ['api', 'peer']);
+    assert.equal((scenes[i + 1].match(new RegExp(`>${label}</text>`, 'g')) || []).length, 2);
+    assert.doesNotMatch(scenes[i + 1], /data-key="(?:Old|New) API"/);
+  }
+  const data = JSON.parse(/id="amv-data">(.*?)<\/script>/.exec(html)?.[1] ?? '');
+  assert.equal(data.segments[1].beats[0].focus, 'api');
+  assert.equal(data.segments[2].beats[0].focus, 'api');
+});

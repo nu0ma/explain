@@ -48,6 +48,20 @@ explain cache [clear]                               # show (or clear) the narrat
 - `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 24.21 or later. The sources are TypeScript and run directly on Node without a build step.
 - Video narration is synthesized only with macOS `say`, using a Japanese voice (Kyoko, Eddy, Flo, or Reed, in that order). No external TTS service or API key is used. On other platforms, use `--voice off` for a subtitles-only video.
 
+## Stable flow node IDs
+
+Existing flow syntax still uses the label as the node ID (`A -> B`, `(Start)`, `[API]`). To give two nodes the same label, or rename a node between video scenes, declare an explicit ID before its shape brackets:
+
+```flow LR
+@api1[API] -> @api2[API]
+api1 -> @db[(Database)]
+group Backend: api2, db
+```
+
+Use `@id[Label]`, `@id(Label)`, `@id{Label}`, or `@id[(Label)]`. The ID starts with an ASCII letter or underscore and contains only ASCII letters, digits, underscores, hyphens, or dots. Put diff/highlight marks before the declaration, for example `+*@api1[API]`. References use the ID without `@`, including group members. A reference may precede its declaration. Within a diagram, the last explicit declaration supplies the label; bare references do not reset it.
+
+In consecutive video scenes, `@api[Old API]` and `@api[New API]` share the same animation identity. Narration can target the ID with `[api]`. Declare the label in each diagram. Video animation and focus use IDs across the whole scene, so use distinct IDs for nodes in separate diagrams within one scene. IDs are case-sensitive; camera focus tries an exact ID before its existing fuzzy label matching. Different IDs remain different nodes even when their labels match. To show the new declaration syntax literally as a label, wrap it in a different pair of shape brackets, for example `(@api[API])`.
+
 ## Rewriting AI-style Japanese
 
 `explain lint` only points out AI-style phrasing; it does not rewrite your script. To rewrite a script drafted by an AI agent before running `explain render`, use the [yomiyasu](https://github.com/nanaism/yomiyasu) Agent Skill. It is declared in `apm.yml` (pinned to v1.0.5), so [APM](https://github.com/microsoft/apm) deploys it to `.claude/skills/`:

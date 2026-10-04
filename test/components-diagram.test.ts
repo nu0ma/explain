@@ -160,3 +160,61 @@ test('flow: 差分の印で追加・変更・削除のノードと矢印を色�
   if (model.nodes.get('Redis')?.shape !== 'db') assert.fail('印と形の括弧を併用できない');
   if (model.nodes.get('検索')?.diff !== 'chg') assert.fail('~ が変更として解析されない');
 });
+
+test('parseFlow: explicit IDs distinguish duplicate labels and drive edges and groups', () => {
+  const m = parseFlow('@api1[API] -> @api2[API]\napi1 --> api2: retry\ngroup Services: api1, api2');
+  assert.deepEqual([...m.nodes.keys()], ['api1', 'api2']);
+  assert.deepEqual([...m.nodes.values()].map((n) => n.label), ['API', 'API']);
+  assert.deepEqual(m.edges.map((e) => [e.from, e.to]), [['api1', 'api2'], ['api1', 'api2']]);
+  assert.deepEqual(m.groups[0].members, ['api1', 'api2']);
+  const svg = render('flow', '@api1[API] -> @api2[API]\ngroup Services: api1, api2');
+  assert.equal((svg.match(/class="am-node /g) || []).length, 2);
+  assert.match(svg, /data-key="api1"/);
+  assert.match(svg, /data-key="api2"/);
+  assert.equal((svg.match(/>API<\/text>/g) || []).length, 2);
+  assert.match(svg, /aria-label="フロー図：API、API"/);
+});
+
+test('parseFlow: declarations update labels without moving the first appearance or losing marks', () => {
+  const m = parseFlow('+*api -> sink\n@api(API v1)\napi -> sink\n@api{API v2}\n[api]');
+  const node = m.nodes.get('api');
+  assert.ok(node);
+  assert.equal(m.nodes.size, 2);
+  assert.equal(node.label, 'API v2');
+  assert.equal(node.line, 1);
+  assert.equal(node.hi, true);
+  assert.equal(node.diff, 'add');
+  assert.equal(node.shape, 'rect');
+});
+
+test('parseFlow: explicit IDs support every shape, marks, fan-out, chains, and edge labels', () => {
+  const m = parseFlow('@start(Start) +-> +*@db[(Store)] & ~@check{Ready?} -> -@end[End: done]: result');
+  assert.deepEqual([...m.nodes.values()].map((n) => [n.id, n.shape, n.diff, n.hi]), [
+    ['start', 'round', null, false], ['db', 'db', 'add', true], ['check', 'diamond', 'chg', false], ['end', 'rect', 'del', false],
+  ]);
+  assert.deepEqual(m.edges.map((e) => [e.from, e.to, e.diff, e.label]), [
+    ['start', 'db', 'add', ''], ['start', 'check', 'add', ''], ['db', 'end', null, 'result'], ['check', 'end', null, 'result'],
+  ]);
+  assert.equal(m.nodes.get('end')?.label, 'End: done');
+});
+
+test('parseFlow: existing bare and bracketed labels keep their identity', () => {
+  const labels = ['API(v1)', 'api[API]', '@mention', 'name@example.com', '日本語', '@api[API]'];
+  for (const label of labels) {
+    const source = label === '@api[API]' ? `(${label})` : label;
+    const m = parseFlow(source);
+    assert.equal(m.nodes.get(label)?.label, label);
+  }
+  assert.deepEqual([...parseFlow('(Start) -> [End]\nStart -> End').nodes.keys()], ['Start', 'End']);
+});
+
+test('flow: explicit IDs keep line-aware errors, escaped text, and collision-free clusters', () => {
+  throwsAt(() => parseFlow('A\n@api[]'), 2);
+  throwsAt(() => parseFlow('A\n@api[unclosed'), 2);
+  throwsAt(() => parseFlow('@api[API]\ngroup Services: API'), 2);
+  const svg = render('flow', '@__group0[<API & "label">] -> @__group0_[API]\ngroup Services: __group0, __group0_');
+  assert.match(svg, /data-key="__group0"/);
+  assert.match(svg, /data-key="__group0_"/);
+  assert.match(svg, /&lt;API &amp; &quot;label&quot;&gt;/);
+  assert.equal((svg.match(/class="am-cluster"/g) || []).length, 1);
+});
