@@ -164,8 +164,8 @@ export async function main(argv: string[], io: MainIO = {}): Promise<number> {
   const out = io.stdout ?? process.stdout;
   const err = io.stderr ?? process.stderr;
   const env = io.env ?? process.env;
-  const print: Print = (s = '') => out.write(`${s}\n`);
-  const fail: Fail = (s) => err.write(`${s}\n`);
+  const print: Print = (s = '') => out.write(`${stripControls(s)}\n`);
+  const fail: Fail = (s) => err.write(`${stripControls(s)}\n`);
 
   let parsed;
   try {
@@ -606,6 +606,16 @@ function openFile(file: string): void {
   } catch {
     // Failing to open a browser does not affect the output; the path is already printed.
   }
+}
+
+// Messages echo text from the manuscript and the page. Drop control characters other than tab and newline so that text cannot send escape sequences to the terminal.
+function stripControls(s: string): string {
+  return [...s].filter((c) => !isControl(c)).join('');
+}
+
+export function isControl(c: string): boolean {
+  const n = c.codePointAt(0) ?? 0;
+  return (n < 0x20 && c !== '\t' && c !== '\n') || (n >= 0x7f && n <= 0x9f);
 }
 
 function errorMessage(e: unknown): string {

@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { get } from 'node:http';
-import { main, shouldOpen } from '../src/cli.ts';
+import { main, shouldOpen, isControl } from '../src/cli.ts';
 import { ExportError } from '../src/video/export.ts';
 import { findSimplified } from './helpers/chinese.ts';
 
@@ -314,4 +314,11 @@ test('cli render --report json: 原稿のエラーも JSON で出す。--report 
   assert.match(j.error.example, /```flow/);
   assert.equal((await run(['render', '-', '--report', 'xml'], { stdin: GOOD })).code, 2);
   assert.equal((await run(['render', 'a.md', '--watch', '--png'])).code, 2);
+});
+
+test('cli: 原稿にある端末の制御文字は、メッセージに出す前に取り除く', async () => {
+  const r = await run(['render', '-'], { stdin: '## A\n```limits\nx\u001b]0;title\u0007\u009b31m | 0\n```\n' });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /x\]0;title31m \| 0/);
+  assert.equal([...r.err].some(isControl), false);
 });
