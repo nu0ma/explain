@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 
-// npm run build で dist/explain.mjs を作り、それだけを別の場所へ写しても動くことを確かめる。
+// pnpm run build で dist/explain.mjs を作り、それだけを別の場所へ写しても動くことを確かめる。
 test('bundle: dist/explain.mjs は単体で動く', () => {
   const build = spawnSync(process.execPath, [join(ROOT, 'scripts/build.mjs')], { encoding: 'utf8', cwd: ROOT });
   assert.equal(build.status, 0, build.stderr);
