@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="explain 0.4.0">
-<title>Transactional Outbox</title>
+<title>OAuth 2.0の認可コードフロー</title>
 <style>
 html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -459,92 +459,85 @@ html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var
 <button class="am-btn" type="button" data-am="copy" data-done="コピーしました ✓">原稿をコピー</button>
 </div>
 <main class="am-sheet">
-<header class="am-head"><h1>Transactional Outbox</h1><p class="am-sub">DBの更新とイベントの送信を食い違わせない</p><div class="am-intro am-md"><div class="am-md"><p>Transactional Outboxでは、業務データとイベントを同じトランザクションでDBに書く。
-別のプロセスがoutboxテーブルを読み、ブローカーへ送る。
-DBの更新とイベントの送信が食い違わなくなる。</p>
+<header class="am-head"><h1>OAuth 2.0の認可コードフロー</h1><p class="am-sub">ユーザーの同意を経て、アプリがアクセストークンを受け取るまで</p><div class="am-intro am-md"><div class="am-md"><p>アプリはユーザーのパスワードを受け取りません。認可サーバーが発行した認可コードを、アプリのサーバーがアクセストークンに交換します。</p>
 </div></div></header>
 <div class="am-frame">
 <div class="am-ruler am-ruler--top" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--bottom" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--left" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div><div class="am-ruler am-ruler--right" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
-<div class="am-grid" style="--cols: 3">
-<section class="am-panel am-span-wide" id="panel-A" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">A</span><h2>二重書き込みの問題</h2></header>
-<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 539 148" width="539" height="148" role="img" aria-label="フロー図：注文API、orders、ブローカー、在庫サービス" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M101.8,44 L113.3,41.3 Q124.8,38.5 190.9,38.5 Q256.9,38.5 268.4,38.5 Q279.9,38.5 286.8,38.5 L293.7,38.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="164.5" y="29.5" width="52.8" height="18" rx="3"/><text x="190.9" y="38.5" text-anchor="middle" dominant-baseline="central">INSERT</text></g></g><g data-step="1"><path class="am-edge am-edge--dashed" d="M101.8,63 L113.3,77.8 Q124.8,92.5 190.9,92.5 Q256.9,92.5 268.4,99.8 L279.9,107" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="125.8" y="83.5" width="130.1" height="18" rx="3"/><text x="190.9" y="92.5" text-anchor="middle" dominant-baseline="central">publish（失敗しうる）</text></g></g><g data-step="2"><path class="am-edge" d="M372.9,116.5 L384.4,116.5 Q395.9,116.5 407.4,116.5 L418.9,116.5" marker-end="url(#am1-arrow)"/></g></g><g><g class="am-node am-node--round" data-key="注文API" data-step="0"><rect class="am-node-shape" x="14" y="36" width="87.8" height="35" rx="17.5"/><text x="57.9" y="53.5" text-anchor="middle" dominant-baseline="central">注文API</text></g><g class="am-node am-node--db" data-key="orders" data-step="0"><path class="am-node-shape" d="M293.7,21 A32.7,7 0 0 1 359.1,21 V56 A32.7,7 0 0 1 293.7,56 Z"/><path class="am-node-shape" d="M293.7,21 A32.7,7 0 0 0 359.1,21"/><text x="326.4" y="42.5" text-anchor="middle" dominant-baseline="central">orders</text></g><g class="am-node am-node--rect" data-key="ブローカー" data-step="1"><rect class="am-node-shape" x="279.9" y="99" width="93" height="35" rx="3"/><text x="326.4" y="116.5" text-anchor="middle" dominant-baseline="central">ブローカー</text></g><g class="am-node am-node--rect" data-key="在庫サービス" data-step="2"><rect class="am-node-shape" x="418.9" y="99" width="106" height="35" rx="3"/><text x="471.9" y="116.5" text-anchor="middle" dominant-baseline="central">在庫サービス</text></g></g></svg></figure>
-<div class="am-md"><p>DBへの書き込みとブローカーへの送信は、1つのトランザクションにできない。
-DBに書いたあとで送信に失敗すると、在庫サービスは注文を知らないままになる。</p>
-</div></div>
+<div class="am-grid" style="--cols: 2">
+<section class="am-panel am-span-wide" id="panel-A" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">A</span><h2>結論 トークンはブラウザを通らずにアプリへ届く</h2></header>
+<div class="am-panel-body"><div class="am-callout am-callout--ok" role="note"><div class="am-callout-body am-md"><p>ブラウザが運ぶのは短命な認可コードだけです。アプリのサーバーは認可コードとクライアント認証情報を認可サーバーへ直接送ります。その応答でアクセストークンを受け取ります。</p>
+</div></div></div>
 </section>
-<section class="am-panel am-span-wide" id="panel-B" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">B</span><h2>Outboxを使う形</h2></header>
-<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 887 200" width="887" height="200" role="img" aria-label="フロー図：注文API、orders、outbox、リレー、ブローカー、在庫サービス" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><defs><marker id="am2-arrow-add" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow am-arrow--add" d="M0,0 L10,5 L0,10 z"/></marker></defs><g><rect class="am-cluster" x="191.6" y="14" width="132.6" height="172" rx="4"/><text class="am-cluster-label" x="199.6" y="28">1つのトランザクション</text></g><g><g data-step="0"><path class="am-edge" d="M101.8,70 L113.3,67.3 Q124.8,64.5 152.2,64.5 Q179.6,64.5 191.6,64.5 Q203.6,64.5 204.4,64.5 L205.2,64.5" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="125.8" y="55.5" width="52.8" height="18" rx="3"/><text x="152.2" y="64.5" text-anchor="middle" dominant-baseline="central">INSERT</text></g></g><g data-step="1"><path class="am-edge am-edge--add" d="M101.8,89 L113.3,105.5 Q124.8,122 152.2,122 Q179.6,122 191.6,127.7 L203.6,133.3" marker-end="url(#am2-arrow-add)"/><g class="am-edge-label"><rect x="125.8" y="113" width="52.8" height="18" rx="3"/><text x="152.2" y="122" text-anchor="middle" dominant-baseline="central">INSERT</text></g></g><g data-step="2"><path class="am-edge am-edge--add" d="M272.2,149.5 L304.2,149.5 Q336.2,149.5 388.2,149.5 Q440.2,149.5 451.7,149.5 L463.2,149.5" marker-end="url(#am2-arrow-add)"/><g class="am-edge-label"><rect x="337.2" y="140.5" width="102" height="18" rx="3"/><text x="388.2" y="149.5" text-anchor="middle" dominant-baseline="central">未送信の行を読む</text></g></g><g data-step="3"><path class="am-edge am-edge--add" d="M530.2,149.5 L541.7,149.5 Q553.2,149.5 579,149.5 Q604.8,149.5 616.3,149.5 L627.8,149.5" marker-end="url(#am2-arrow-add)"/><g class="am-edge-label"><rect x="554.2" y="140.5" width="49.6" height="18" rx="3"/><text x="579" y="149.5" text-anchor="middle" dominant-baseline="central">publish</text></g></g><g data-step="4"><path class="am-edge" d="M720.8,149.5 L732.3,149.5 Q743.8,149.5 755.3,149.5 L766.8,149.5" marker-end="url(#am2-arrow)"/></g></g><g><g class="am-node am-node--round" data-key="注文API" data-step="0"><rect class="am-node-shape" x="14" y="62" width="87.8" height="35" rx="17.5"/><text x="57.9" y="79.5" text-anchor="middle" dominant-baseline="central">注文API</text></g><g class="am-node am-node--db" data-key="orders" data-step="0"><path class="am-node-shape" d="M205.2,47 A32.7,7 0 0 1 270.6,47 V82 A32.7,7 0 0 1 205.2,82 Z"/><path class="am-node-shape" d="M205.2,47 A32.7,7 0 0 0 270.6,47"/><text x="237.9" y="68.5" text-anchor="middle" dominant-baseline="central">orders</text></g><g class="am-node am-node--db am-node--add" data-key="outbox" data-step="1"><path class="am-node-shape" d="M203.6,132 A34.3,7 0 0 1 272.2,132 V167 A34.3,7 0 0 1 203.6,167 Z"/><path class="am-node-shape" d="M203.6,132 A34.3,7 0 0 0 272.2,132"/><text x="237.9" y="153.5" text-anchor="middle" dominant-baseline="central">outbox</text></g><g class="am-node am-node--rect am-node--add" data-key="リレー" data-step="2"><rect class="am-node-shape" x="463.2" y="132" width="67" height="35" rx="3"/><text x="496.7" y="149.5" text-anchor="middle" dominant-baseline="central">リレー</text></g><g class="am-node am-node--rect" data-key="ブローカー" data-step="3"><rect class="am-node-shape" x="627.8" y="132" width="93" height="35" rx="3"/><text x="674.3" y="149.5" text-anchor="middle" dominant-baseline="central">ブローカー</text></g><g class="am-node am-node--rect" data-key="在庫サービス" data-step="4"><rect class="am-node-shape" x="766.8" y="132" width="106" height="35" rx="3"/><text x="819.8" y="149.5" text-anchor="middle" dominant-baseline="central">在庫サービス</text></g></g></svg><figcaption class="am-legend"><span class="am-legend-item am-legend-item--add"><i></i>追加</span></figcaption></figure>
-<div class="am-md"><p>注文APIは、ordersとoutboxに同じトランザクションで書く。
-リレーはoutboxの未送信の行を読み、ブローカーへ送る。</p>
-</div></div>
+<section class="am-panel am-span-wide" id="panel-B" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>全体の流れ 5者が3段階でやりとりする</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-seq"><svg viewBox="0 0 1023 764" width="1023" height="764" role="img" aria-label="シーケンス図：ユーザー、ブラウザ、アプリ、認可サーバー、リソースサーバー" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="54" y1="42" x2="54" y2="760"/><g data-key="ユーザー"><rect class="am-actor" x="12" y="8" width="84" height="34" rx="2"/><text x="54" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">ユーザー</text></g><line class="am-lifeline" x1="218" y1="42" x2="218" y2="760"/><g data-key="ブラウザ"><rect class="am-actor" x="176" y="8" width="84" height="34" rx="2"/><text x="218" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">ブラウザ</text></g><line class="am-lifeline" x1="477.4" y1="42" x2="477.4" y2="760"/><g data-key="アプリ"><rect class="am-actor" x="435.4" y="8" width="84" height="34" rx="2"/><text x="477.4" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">アプリ</text></g><line class="am-lifeline" x1="797.6" y1="42" x2="797.6" y2="760"/><g data-key="認可サーバー"><rect class="am-actor" x="744.6" y="8" width="106" height="34" rx="2"/><text x="797.6" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">認可サーバー</text></g><line class="am-lifeline" x1="944.6" y1="42" x2="944.6" y2="760"/><g data-key="リソースサーバー"><rect class="am-actor" x="878.6" y="8" width="132" height="34" rx="2"/><text x="944.6" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">リソースサーバー</text></g><g data-step="0"><line class="am-lifeline" x1="12" y1="74" x2="1010.6" y2="74"/><rect class="am-actor" x="459.3" y="64" width="104" height="20" rx="2"/><text x="511.3" y="74" text-anchor="middle" dominant-baseline="central" font-size="12">認可リクエスト</text></g><g data-step="1"><text x="136" y="104" text-anchor="middle">ログインボタンを押す</text><path class="am-edge" d="M54,114 L216,114" marker-end="url(#am1-arrow)"/><text class="am-step" x="60" y="108" text-anchor="start">1</text></g><g data-step="2"><text x="347.7" y="144" text-anchor="middle">ログイン開始を頼む</text><path class="am-edge" d="M218,154 L475.4,154" marker-end="url(#am1-arrow)"/><text class="am-step" x="224" y="148" text-anchor="start">2</text></g><g data-step="3"><text x="347.7" y="184" text-anchor="middle">認可サーバーへリダイレクトさせる（</text><text x="347.7" y="200" text-anchor="middle">client_id, redirect_uri, scope, state）</text><path class="am-edge am-edge--dashed" d="M477.4,210 L220,210" marker-end="url(#am1-arrow)"/><text class="am-step" x="471.4" y="204" text-anchor="end">3</text></g><g data-step="4"><text x="507.8" y="240" text-anchor="middle">認可画面を開く</text><path class="am-edge" d="M218,250 L795.6,250" marker-end="url(#am1-arrow)"/><text class="am-step" x="224" y="244" text-anchor="start">4</text></g><g data-step="5"><text x="425.8" y="280" text-anchor="middle">ログインと同意を求める</text><path class="am-edge am-edge--dashed" d="M797.6,290 L56,290" marker-end="url(#am1-arrow)"/><text class="am-step" x="791.6" y="284" text-anchor="end">5</text></g><g data-step="6"><text x="425.8" y="320" text-anchor="middle">ログインして同意する</text><path class="am-edge" d="M54,330 L795.6,330" marker-end="url(#am1-arrow)"/><text class="am-step" x="60" y="324" text-anchor="start">6</text></g><g data-step="7"><text x="507.8" y="360" text-anchor="middle">redirect_uriへリダイレクトさせる（認可</text><text x="507.8" y="376" text-anchor="middle">コード, state）</text><path class="am-edge am-edge--dashed" d="M797.6,386 L220,386" marker-end="url(#am1-arrow)"/><text class="am-step" x="791.6" y="380" text-anchor="end">7</text></g><g data-step="8"><text x="347.7" y="416" text-anchor="middle">認可コードとstateを渡す</text><path class="am-edge" d="M218,426 L475.4,426" marker-end="url(#am1-arrow)"/><text class="am-step" x="224" y="420" text-anchor="start">8</text></g><g data-step="9"><line class="am-lifeline" x1="12" y1="460" x2="1010.6" y2="460"/><rect class="am-actor" x="465.3" y="450" width="92" height="20" rx="2"/><text x="511.3" y="460" text-anchor="middle" dominant-baseline="central" font-size="12">トークン交換</text></g><g data-step="10"><text x="517.4" y="488" dominant-baseline="central">stateが送ったものと一致するか確かめる</text><path class="am-edge" d="M477.4,484 H507.4 V504 H479.4" marker-end="url(#am1-arrow)"/><text class="am-step" x="483.4" y="494" text-anchor="start">9</text></g><g data-step="11"><text x="637.5" y="538" text-anchor="middle">認可コードとクライアント認証情報を送</text><text x="637.5" y="554" text-anchor="middle">る</text><path class="am-edge" d="M477.4,564 L795.6,564" marker-end="url(#am1-arrow)"/><text class="am-step" x="483.4" y="558" text-anchor="start">10</text></g><g data-step="12"><text x="637.5" y="594" text-anchor="middle">アクセストークンを返す（リフレッシュ</text><text x="637.5" y="610" text-anchor="middle">トークンも返す場合がある）</text><path class="am-edge am-edge--dashed" d="M797.6,620 L479.4,620" marker-end="url(#am1-arrow)"/><text class="am-step" x="791.6" y="614" text-anchor="end">11</text></g><g data-step="13"><line class="am-lifeline" x1="12" y1="654" x2="1010.6" y2="654"/><rect class="am-actor" x="441.3" y="644" width="140" height="20" rx="2"/><text x="511.3" y="654" text-anchor="middle" dominant-baseline="central" font-size="12">リソースへのアクセス</text></g><g data-step="14"><text x="711" y="684" text-anchor="middle">アクセストークンを付けてAPIを呼ぶ</text><path class="am-edge" d="M477.4,694 L942.6,694" marker-end="url(#am1-arrow)"/><text class="am-step" x="483.4" y="688" text-anchor="start">12</text></g><g data-step="15"><text x="711" y="724" text-anchor="middle">ユーザーのデータを返す</text><path class="am-edge am-edge--dashed" d="M944.6,734 L479.4,734" marker-end="url(#am1-arrow)"/><text class="am-step" x="938.6" y="728" text-anchor="end">13</text></g></svg></figure></div>
 </section>
 <section class="am-panel" id="panel-C">
-<header class="am-panel-head"><span class="am-panel-id">C</span><h2>送信の順序</h2></header>
-<div class="am-panel-body"><figure class="am-diagram am-seq"><svg viewBox="0 0 554 310" width="554" height="310" role="img" aria-label="シーケンス図：注文API、DB、リレー、ブローカー" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="54" y1="42" x2="54" y2="306"/><g data-key="注文API"><rect class="am-actor" x="12" y="8" width="84" height="34" rx="2"/><text x="54" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">注文API</text></g><line class="am-lifeline" x1="240.4" y1="42" x2="240.4" y2="306"/><g data-key="DB"><rect class="am-actor" x="198.4" y="8" width="84" height="34" rx="2"/><text x="240.4" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">DB</text></g><line class="am-lifeline" x1="378.4" y1="42" x2="378.4" y2="306"/><g data-key="リレー"><rect class="am-actor" x="336.4" y="8" width="84" height="34" rx="2"/><text x="378.4" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">リレー</text></g><line class="am-lifeline" x1="494.9" y1="42" x2="494.9" y2="306"/><g data-key="ブローカー"><rect class="am-actor" x="448.4" y="8" width="93" height="34" rx="2"/><text x="494.9" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">ブローカー</text></g><g data-step="0"><text x="147.2" y="70" text-anchor="middle">ordersとoutboxにINSERT</text><path class="am-edge" d="M54,80 L238.4,80" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="74" text-anchor="start">1</text></g><g data-step="1"><text x="147.2" y="110" text-anchor="middle">COMMIT</text><path class="am-edge am-edge--dashed" d="M240.4,120 L56,120" marker-end="url(#am3-arrow)"/><text class="am-step" x="234.4" y="114" text-anchor="end">2</text></g><g data-step="2"><text x="309.4" y="150" text-anchor="middle">未送信の行を読む</text><path class="am-edge" d="M378.4,160 L242.4,160" marker-end="url(#am3-arrow)"/><text class="am-step" x="372.4" y="154" text-anchor="end">3</text></g><g data-step="3"><text x="436.6" y="190" text-anchor="middle">publish</text><path class="am-edge" d="M378.4,200 L492.9,200" marker-end="url(#am3-arrow)"/><text class="am-step" x="384.4" y="194" text-anchor="start">4</text></g><g data-step="4"><text x="436.6" y="230" text-anchor="middle">ack</text><path class="am-edge am-edge--dashed" d="M494.9,240 L380.4,240" marker-end="url(#am3-arrow)"/><text class="am-step" x="488.9" y="234" text-anchor="end">5</text></g><g data-step="5"><text x="309.4" y="270" text-anchor="middle">送信済みにする</text><path class="am-edge" d="M378.4,280 L242.4,280" marker-end="url(#am3-arrow)"/><text class="am-step" x="372.4" y="274" text-anchor="end">6</text></g></svg></figure></div>
-</section>
-<section class="am-panel am-span-wide" id="panel-D" style="grid-column: span 2">
-<header class="am-panel-head"><span class="am-panel-id">D</span><h2>二重書き込みとの比較</h2></header>
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>登場人物 4つの役割を分けて考える</h2></header>
 <div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>観点</th>
-<th>二重書き込み</th>
-<th>Outbox</th>
+<th>役割</th>
+<th>仕様での名前</th>
+<th>この図での例</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>DBだけ更新される</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>起きる</span></td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>起きない</span></td>
+<td>データの持ち主</td>
+<td>Resource Owner</td>
+<td>ユーザー</td>
 </tr>
 <tr>
-<td>イベントの遅れ</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>ほぼない</span></td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>リレーの間隔だけ遅れる</span></td>
+<td>データを使いたい側</td>
+<td>Client</td>
+<td>アプリ</td>
 </tr>
 <tr>
-<td>同じイベントの重複</td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>再送すると起きる</span></td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>起きる</span></td>
+<td>同意を取りトークンを出す側</td>
+<td>Authorization Server</td>
+<td>認可サーバー</td>
 </tr>
 <tr>
-<td>部品の数</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>少ない</span></td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>リレーが増える</span></td>
+<td>データを持つAPI</td>
+<td>Resource Server</td>
+<td>リソースサーバー</td>
+</tr>
+</tbody></table></div>
+<p>ブラウザはリダイレクトを運ぶ通り道で、仕様上の4つの役割には含まれません。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-D">
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>安全のしくみ 各パラメーターが別の攻撃を防ぐ</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>パラメーター</th>
+<th>防ぐもの</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>state</td>
+<td>他人の認可コードを差し込むCSRF</td>
+</tr>
+<tr>
+<td>redirect_uriの事前登録</td>
+<td>認可コードを攻撃者のサイトへ送らせること</td>
+</tr>
+<tr>
+<td>クライアント認証情報</td>
+<td>盗んだ認可コードだけでトークンを得ること</td>
+</tr>
+<tr>
+<td>PKCE（code_verifier）</td>
+<td>認可コードの横取り。秘密を保てないSPAやモバイルアプリで特に必要</td>
 </tr>
 </tbody></table></div>
 </div></div>
 </section>
-<section class="am-panel" id="panel-E">
-<header class="am-panel-head"><span class="am-panel-id">E</span><h2>リレーの作り方</h2></header>
-<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>方式</th>
-<th>読み方</th>
-<th>注意点</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>ポーリング</td>
-<td>一定の間隔で未送信の行をSELECTする</td>
-<td>DBに読み込みの負荷がかかる</td>
-</tr>
-<tr>
-<td>CDC</td>
-<td>DBの変更ログを読む（例：Debezium）</td>
-<td>変更ログを読む仕組みを運用する</td>
-</tr>
-</tbody></table></div>
-</div></div>
-</section>
-<section class="am-panel am-span-wide" id="panel-F" style="grid-column: span 2">
-<header class="am-panel-head"><span class="am-panel-id">F</span><h2>受け手の条件</h2></header>
-<div class="am-panel-body"><div class="am-callout am-callout--warn" role="note"><div class="am-callout-title">重複は防げない</div><div class="am-callout-body am-md"><p>リレーは、送ったあとで「送信済み」と記録する前に落ちることがある。
-そのときは同じイベントをもう一度送る。
-受け手はイベントのIDで重複を捨て、冪等に処理する。</p>
+<section class="am-panel am-span-wide" id="panel-E" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">E</span><h2>注意 認可コードは1回だけ使える</h2></header>
+<div class="am-panel-body"><div class="am-callout am-callout--warn" role="note"><div class="am-callout-body am-md"><p>認可コードは短命で、使えるのは1回だけです。RFC 6749は有効期限を最長10分にするよう推奨しています。現在のOAuth 2.0 Security BCPは、すべてのクライアントでPKCEを使うよう推奨しています。</p>
 </div></div></div>
 </section>
 </div>
@@ -552,67 +545,59 @@ DBに書いたあとで送信に失敗すると、在庫サービスは注文を
 </main>
 <footer class="am-colophon">explain 0.4.0 で生成 · 2026-10-04 22:27</footer>
 <textarea id="am-source" hidden readonly aria-hidden="true">---
-title: Transactional Outbox
-subtitle: DBの更新とイベントの送信を食い違わせない
-cols: 3
+title: OAuth 2.0の認可コードフロー
+subtitle: ユーザーの同意を経て、アプリがアクセストークンを受け取るまで
+cols: 2
 ---
+アプリはユーザーのパスワードを受け取りません。認可サーバーが発行した認可コードを、アプリのサーバーがアクセストークンに交換します。
 
-Transactional Outboxでは、業務データとイベントを同じトランザクションでDBに書く。
-別のプロセスがoutboxテーブルを読み、ブローカーへ送る。
-DBの更新とイベントの送信が食い違わなくなる。
-
-## A 二重書き込みの問題 {span=3}
-```flow LR
-(注文API) -&gt; [(orders)]: INSERT
-(注文API) --&gt; ブローカー: publish（失敗しうる）
-ブローカー -&gt; 在庫サービス
+## 結論 トークンはブラウザを通らずにアプリへ届く {span=2}
+```callout ok
+ブラウザが運ぶのは短命な認可コードだけです。アプリのサーバーは認可コードとクライアント認証情報を認可サーバーへ直接送ります。その応答でアクセストークンを受け取ります。
 ```
 
-DBへの書き込みとブローカーへの送信は、1つのトランザクションにできない。
-DBに書いたあとで送信に失敗すると、在庫サービスは注文を知らないままになる。
-
-## B Outboxを使う形 {span=3}
-```flow LR
-(注文API) -&gt; [(orders)]: INSERT
-(注文API) +-&gt; +[(outbox)]: INSERT
-group 1つのトランザクション: orders, outbox
-outbox +-&gt; +リレー: 未送信の行を読む
-リレー +-&gt; ブローカー: publish
-ブローカー -&gt; 在庫サービス
-```
-
-注文APIは、ordersとoutboxに同じトランザクションで書く。
-リレーはoutboxの未送信の行を読み、ブローカーへ送る。
-
-## C 送信の順序
+## 全体の流れ 5者が3段階でやりとりする {span=2}
 ```sequence num
-注文API -&gt; DB: ordersとoutboxにINSERT
-DB --&gt; 注文API: COMMIT
-リレー -&gt; DB: 未送信の行を読む
-リレー -&gt; ブローカー: publish
-ブローカー --&gt; リレー: ack
-リレー -&gt; DB: 送信済みにする
+participants: ユーザー, ブラウザ, アプリ, 認可サーバー, リソースサーバー
+== 認可リクエスト ==
+ユーザー -&gt; ブラウザ: ログインボタンを押す
+ブラウザ -&gt; アプリ: ログイン開始を頼む
+アプリ --&gt; ブラウザ: 認可サーバーへリダイレクトさせる（client_id, redirect_uri, scope, state）
+ブラウザ -&gt; 認可サーバー: 認可画面を開く
+認可サーバー --&gt; ユーザー: ログインと同意を求める
+ユーザー -&gt; 認可サーバー: ログインして同意する
+認可サーバー --&gt; ブラウザ: redirect_uriへリダイレクトさせる（認可コード, state）
+ブラウザ -&gt; アプリ: 認可コードとstateを渡す
+== トークン交換 ==
+アプリ -&gt; アプリ: stateが送ったものと一致するか確かめる
+アプリ -&gt; 認可サーバー: 認可コードとクライアント認証情報を送る
+認可サーバー --&gt; アプリ: アクセストークンを返す（リフレッシュトークンも返す場合がある）
+== リソースへのアクセス ==
+アプリ -&gt; リソースサーバー: アクセストークンを付けてAPIを呼ぶ
+リソースサーバー --&gt; アプリ: ユーザーのデータを返す
 ```
 
-## D 二重書き込みとの比較 {span=2}
-| 観点 | 二重書き込み | Outbox |
-| --- | --- | --- |
-| DBだけ更新される | no 起きる | ok 起きない |
-| イベントの遅れ | ok ほぼない | warn リレーの間隔だけ遅れる |
-| 同じイベントの重複 | warn 再送すると起きる | warn 起きる |
-| 部品の数 | ok 少ない | warn リレーが増える |
+## 登場人物 4つの役割を分けて考える
+| 役割 | 仕様での名前 | この図での例 |
+|---|---|---|
+| データの持ち主 | Resource Owner | ユーザー |
+| データを使いたい側 | Client | アプリ |
+| 同意を取りトークンを出す側 | Authorization Server | 認可サーバー |
+| データを持つAPI | Resource Server | リソースサーバー |
 
-## E リレーの作り方
-| 方式 | 読み方 | 注意点 |
-| --- | --- | --- |
-| ポーリング | 一定の間隔で未送信の行をSELECTする | DBに読み込みの負荷がかかる |
-| CDC | DBの変更ログを読む（例：Debezium） | 変更ログを読む仕組みを運用する |
+ブラウザはリダイレクトを運ぶ通り道で、仕様上の4つの役割には含まれません。
 
-## F 受け手の条件 {span=2}
-```callout warn 重複は防げない
-リレーは、送ったあとで「送信済み」と記録する前に落ちることがある。
-そのときは同じイベントをもう一度送る。
-受け手はイベントのIDで重複を捨て、冪等に処理する。
+## 安全のしくみ 各パラメーターが別の攻撃を防ぐ
+| パラメーター | 防ぐもの |
+|---|---|
+| state | 他人の認可コードを差し込むCSRF |
+| redirect_uriの事前登録 | 認可コードを攻撃者のサイトへ送らせること |
+| クライアント認証情報 | 盗んだ認可コードだけでトークンを得ること |
+| PKCE（code_verifier） | 認可コードの横取り。秘密を保てないSPAやモバイルアプリで特に必要 |
+
+## 注意 認可コードは1回だけ使える {span=2}
+```callout warn
+認可コードは短命で、使えるのは1回だけです。RFC 6749は有効期限を最長10分にするよう推奨しています。現在のOAuth 2.0 Security BCPは、すべてのクライアントでPKCEを使うよう推奨しています。
 ```
 </textarea>
 <script>

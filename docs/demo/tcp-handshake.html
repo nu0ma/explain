@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="explain 0.4.0">
-<title>Transactional Outbox</title>
+<title>TCPの3ウェイハンドシェイク</title>
 <style>
 html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -459,161 +459,133 @@ html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var
 <button class="am-btn" type="button" data-am="copy" data-done="コピーしました ✓">原稿をコピー</button>
 </div>
 <main class="am-sheet">
-<header class="am-head"><h1>Transactional Outbox</h1><p class="am-sub">DBの更新とイベントの送信を食い違わせない</p><div class="am-intro am-md"><div class="am-md"><p>Transactional Outboxでは、業務データとイベントを同じトランザクションでDBに書く。
-別のプロセスがoutboxテーブルを読み、ブローカーへ送る。
-DBの更新とイベントの送信が食い違わなくなる。</p>
+<header class="am-head"><h1>TCPの3ウェイハンドシェイク</h1><p class="am-sub">接続を確立するまでの3回のやりとり</p><div class="am-intro am-md"><div class="am-md"><p>クライアントとサーバーは3回のパケット交換で接続を確立する。そのあとでデータを送り始める。</p>
 </div></div></header>
 <div class="am-frame">
 <div class="am-ruler am-ruler--top" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--bottom" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--left" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div><div class="am-ruler am-ruler--right" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
-<div class="am-grid" style="--cols: 3">
-<section class="am-panel am-span-wide" id="panel-A" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">A</span><h2>二重書き込みの問題</h2></header>
-<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 539 148" width="539" height="148" role="img" aria-label="フロー図：注文API、orders、ブローカー、在庫サービス" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M101.8,44 L113.3,41.3 Q124.8,38.5 190.9,38.5 Q256.9,38.5 268.4,38.5 Q279.9,38.5 286.8,38.5 L293.7,38.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="164.5" y="29.5" width="52.8" height="18" rx="3"/><text x="190.9" y="38.5" text-anchor="middle" dominant-baseline="central">INSERT</text></g></g><g data-step="1"><path class="am-edge am-edge--dashed" d="M101.8,63 L113.3,77.8 Q124.8,92.5 190.9,92.5 Q256.9,92.5 268.4,99.8 L279.9,107" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="125.8" y="83.5" width="130.1" height="18" rx="3"/><text x="190.9" y="92.5" text-anchor="middle" dominant-baseline="central">publish（失敗しうる）</text></g></g><g data-step="2"><path class="am-edge" d="M372.9,116.5 L384.4,116.5 Q395.9,116.5 407.4,116.5 L418.9,116.5" marker-end="url(#am1-arrow)"/></g></g><g><g class="am-node am-node--round" data-key="注文API" data-step="0"><rect class="am-node-shape" x="14" y="36" width="87.8" height="35" rx="17.5"/><text x="57.9" y="53.5" text-anchor="middle" dominant-baseline="central">注文API</text></g><g class="am-node am-node--db" data-key="orders" data-step="0"><path class="am-node-shape" d="M293.7,21 A32.7,7 0 0 1 359.1,21 V56 A32.7,7 0 0 1 293.7,56 Z"/><path class="am-node-shape" d="M293.7,21 A32.7,7 0 0 0 359.1,21"/><text x="326.4" y="42.5" text-anchor="middle" dominant-baseline="central">orders</text></g><g class="am-node am-node--rect" data-key="ブローカー" data-step="1"><rect class="am-node-shape" x="279.9" y="99" width="93" height="35" rx="3"/><text x="326.4" y="116.5" text-anchor="middle" dominant-baseline="central">ブローカー</text></g><g class="am-node am-node--rect" data-key="在庫サービス" data-step="2"><rect class="am-node-shape" x="418.9" y="99" width="106" height="35" rx="3"/><text x="471.9" y="116.5" text-anchor="middle" dominant-baseline="central">在庫サービス</text></g></g></svg></figure>
-<div class="am-md"><p>DBへの書き込みとブローカーへの送信は、1つのトランザクションにできない。
-DBに書いたあとで送信に失敗すると、在庫サービスは注文を知らないままになる。</p>
-</div></div>
+<div class="am-grid" style="--cols: 2">
+<section class="am-panel am-span-wide" id="panel-A" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">A</span><h2>3回の交換で双方向の通信路ができる</h2></header>
+<div class="am-panel-body"><div class="am-callout am-callout--info" role="note"><div class="am-callout-body am-md"><p>クライアントがSYNを送り、サーバーがSYN-ACKを返す。最後にクライアントがACKを返す。この3回で、両側が互いの初期シーケンス番号を受け取ったと確認できる。</p>
+</div></div></div>
 </section>
-<section class="am-panel am-span-wide" id="panel-B" style="grid-column: span 3">
-<header class="am-panel-head"><span class="am-panel-id">B</span><h2>Outboxを使う形</h2></header>
-<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 887 200" width="887" height="200" role="img" aria-label="フロー図：注文API、orders、outbox、リレー、ブローカー、在庫サービス" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><defs><marker id="am2-arrow-add" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow am-arrow--add" d="M0,0 L10,5 L0,10 z"/></marker></defs><g><rect class="am-cluster" x="191.6" y="14" width="132.6" height="172" rx="4"/><text class="am-cluster-label" x="199.6" y="28">1つのトランザクション</text></g><g><g data-step="0"><path class="am-edge" d="M101.8,70 L113.3,67.3 Q124.8,64.5 152.2,64.5 Q179.6,64.5 191.6,64.5 Q203.6,64.5 204.4,64.5 L205.2,64.5" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="125.8" y="55.5" width="52.8" height="18" rx="3"/><text x="152.2" y="64.5" text-anchor="middle" dominant-baseline="central">INSERT</text></g></g><g data-step="1"><path class="am-edge am-edge--add" d="M101.8,89 L113.3,105.5 Q124.8,122 152.2,122 Q179.6,122 191.6,127.7 L203.6,133.3" marker-end="url(#am2-arrow-add)"/><g class="am-edge-label"><rect x="125.8" y="113" width="52.8" height="18" rx="3"/><text x="152.2" y="122" text-anchor="middle" dominant-baseline="central">INSERT</text></g></g><g data-step="2"><path class="am-edge am-edge--add" d="M272.2,149.5 L304.2,149.5 Q336.2,149.5 388.2,149.5 Q440.2,149.5 451.7,149.5 L463.2,149.5" marker-end="url(#am2-arrow-add)"/><g class="am-edge-label"><rect x="337.2" y="140.5" width="102" height="18" rx="3"/><text x="388.2" y="149.5" text-anchor="middle" dominant-baseline="central">未送信の行を読む</text></g></g><g data-step="3"><path class="am-edge am-edge--add" d="M530.2,149.5 L541.7,149.5 Q553.2,149.5 579,149.5 Q604.8,149.5 616.3,149.5 L627.8,149.5" marker-end="url(#am2-arrow-add)"/><g class="am-edge-label"><rect x="554.2" y="140.5" width="49.6" height="18" rx="3"/><text x="579" y="149.5" text-anchor="middle" dominant-baseline="central">publish</text></g></g><g data-step="4"><path class="am-edge" d="M720.8,149.5 L732.3,149.5 Q743.8,149.5 755.3,149.5 L766.8,149.5" marker-end="url(#am2-arrow)"/></g></g><g><g class="am-node am-node--round" data-key="注文API" data-step="0"><rect class="am-node-shape" x="14" y="62" width="87.8" height="35" rx="17.5"/><text x="57.9" y="79.5" text-anchor="middle" dominant-baseline="central">注文API</text></g><g class="am-node am-node--db" data-key="orders" data-step="0"><path class="am-node-shape" d="M205.2,47 A32.7,7 0 0 1 270.6,47 V82 A32.7,7 0 0 1 205.2,82 Z"/><path class="am-node-shape" d="M205.2,47 A32.7,7 0 0 0 270.6,47"/><text x="237.9" y="68.5" text-anchor="middle" dominant-baseline="central">orders</text></g><g class="am-node am-node--db am-node--add" data-key="outbox" data-step="1"><path class="am-node-shape" d="M203.6,132 A34.3,7 0 0 1 272.2,132 V167 A34.3,7 0 0 1 203.6,167 Z"/><path class="am-node-shape" d="M203.6,132 A34.3,7 0 0 0 272.2,132"/><text x="237.9" y="153.5" text-anchor="middle" dominant-baseline="central">outbox</text></g><g class="am-node am-node--rect am-node--add" data-key="リレー" data-step="2"><rect class="am-node-shape" x="463.2" y="132" width="67" height="35" rx="3"/><text x="496.7" y="149.5" text-anchor="middle" dominant-baseline="central">リレー</text></g><g class="am-node am-node--rect" data-key="ブローカー" data-step="3"><rect class="am-node-shape" x="627.8" y="132" width="93" height="35" rx="3"/><text x="674.3" y="149.5" text-anchor="middle" dominant-baseline="central">ブローカー</text></g><g class="am-node am-node--rect" data-key="在庫サービス" data-step="4"><rect class="am-node-shape" x="766.8" y="132" width="106" height="35" rx="3"/><text x="819.8" y="149.5" text-anchor="middle" dominant-baseline="central">在庫サービス</text></g></g></svg><figcaption class="am-legend"><span class="am-legend-item am-legend-item--add"><i></i>追加</span></figcaption></figure>
-<div class="am-md"><p>注文APIは、ordersとoutboxに同じトランザクションで書く。
-リレーはoutboxの未送信の行を読み、ブローカーへ送る。</p>
+<section class="am-panel am-span-wide" id="panel-B" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>パケットはSYN、SYN-ACK、ACKの順に流れる</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-seq"><svg viewBox="0 0 350 474" width="350" height="474" role="img" aria-label="シーケンス図：クライアント、サーバー" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="65" y1="42" x2="65" y2="470"/><g data-key="クライアント"><rect class="am-actor" x="12" y="8" width="106" height="34" rx="2"/><text x="65" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">クライアント</text></g><line class="am-lifeline" x1="280.7" y1="42" x2="280.7" y2="470"/><g data-key="サーバー"><rect class="am-actor" x="238.7" y="8" width="84" height="34" rx="2"/><text x="280.7" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">サーバー</text></g><g data-step="0"><rect class="am-note" x="248.4" y="64" width="64.6" height="28" rx="2"/><text x="280.7" y="78" text-anchor="middle" dominant-baseline="central" font-size="12">LISTEN</text></g><g data-step="1"><line class="am-lifeline" x1="12" y1="118" x2="337.9" y2="118"/><rect class="am-actor" x="135" y="108" width="80" height="20" rx="2"/><text x="175" y="118" text-anchor="middle" dominant-baseline="central" font-size="12">接続の確立</text></g><g data-step="2"><text x="172.9" y="148" text-anchor="middle">SYN（seq=x）</text><path class="am-edge" d="M65,158 L278.7,158" marker-end="url(#am1-arrow)"/><text class="am-step" x="71" y="152" text-anchor="start">1</text></g><g data-step="3"><rect class="am-note" x="23.1" y="182" width="83.8" height="28" rx="2"/><text x="65" y="196" text-anchor="middle" dominant-baseline="central" font-size="12">SYN-SENT</text></g><g data-step="4"><text x="172.9" y="232" text-anchor="middle">SYN-ACK（seq=y, ack=x+1）</text><path class="am-edge am-edge--dashed" d="M280.7,242 L67,242" marker-end="url(#am1-arrow)"/><text class="am-step" x="274.7" y="236" text-anchor="end">2</text></g><g data-step="5"><rect class="am-note" x="223.6" y="266" width="114.3" height="28" rx="2"/><text x="280.7" y="280" text-anchor="middle" dominant-baseline="central" font-size="12">SYN-RECEIVED</text></g><g data-step="6"><text x="172.9" y="316" text-anchor="middle">ACK（seq=x+1, ack=y+1）</text><path class="am-edge" d="M65,326 L278.7,326" marker-end="url(#am1-arrow)"/><text class="am-step" x="71" y="320" text-anchor="start">3</text></g><g data-step="7"><rect class="am-note" x="45" y="350" width="255.7" height="28" rx="2"/><text x="172.9" y="364" text-anchor="middle" dominant-baseline="central" font-size="12">ESTABLISHED</text></g><g data-step="8"><line class="am-lifeline" x1="12" y1="404" x2="337.9" y2="404"/><rect class="am-actor" x="135" y="394" width="80" height="20" rx="2"/><text x="175" y="404" text-anchor="middle" dominant-baseline="central" font-size="12">データ転送</text></g><g data-step="9"><text x="172.9" y="434" text-anchor="middle">データ</text><path class="am-edge" d="M65,444 L278.7,444" marker-end="url(#am1-arrow)"/><text class="am-step" x="71" y="438" text-anchor="start">4</text></g></svg></figure>
+<div class="am-md"><p>xとyは、各側がランダムに選ぶ初期シーケンス番号です。</p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-C">
-<header class="am-panel-head"><span class="am-panel-id">C</span><h2>送信の順序</h2></header>
-<div class="am-panel-body"><figure class="am-diagram am-seq"><svg viewBox="0 0 554 310" width="554" height="310" role="img" aria-label="シーケンス図：注文API、DB、リレー、ブローカー" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="54" y1="42" x2="54" y2="306"/><g data-key="注文API"><rect class="am-actor" x="12" y="8" width="84" height="34" rx="2"/><text x="54" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">注文API</text></g><line class="am-lifeline" x1="240.4" y1="42" x2="240.4" y2="306"/><g data-key="DB"><rect class="am-actor" x="198.4" y="8" width="84" height="34" rx="2"/><text x="240.4" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">DB</text></g><line class="am-lifeline" x1="378.4" y1="42" x2="378.4" y2="306"/><g data-key="リレー"><rect class="am-actor" x="336.4" y="8" width="84" height="34" rx="2"/><text x="378.4" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">リレー</text></g><line class="am-lifeline" x1="494.9" y1="42" x2="494.9" y2="306"/><g data-key="ブローカー"><rect class="am-actor" x="448.4" y="8" width="93" height="34" rx="2"/><text x="494.9" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">ブローカー</text></g><g data-step="0"><text x="147.2" y="70" text-anchor="middle">ordersとoutboxにINSERT</text><path class="am-edge" d="M54,80 L238.4,80" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="74" text-anchor="start">1</text></g><g data-step="1"><text x="147.2" y="110" text-anchor="middle">COMMIT</text><path class="am-edge am-edge--dashed" d="M240.4,120 L56,120" marker-end="url(#am3-arrow)"/><text class="am-step" x="234.4" y="114" text-anchor="end">2</text></g><g data-step="2"><text x="309.4" y="150" text-anchor="middle">未送信の行を読む</text><path class="am-edge" d="M378.4,160 L242.4,160" marker-end="url(#am3-arrow)"/><text class="am-step" x="372.4" y="154" text-anchor="end">3</text></g><g data-step="3"><text x="436.6" y="190" text-anchor="middle">publish</text><path class="am-edge" d="M378.4,200 L492.9,200" marker-end="url(#am3-arrow)"/><text class="am-step" x="384.4" y="194" text-anchor="start">4</text></g><g data-step="4"><text x="436.6" y="230" text-anchor="middle">ack</text><path class="am-edge am-edge--dashed" d="M494.9,240 L380.4,240" marker-end="url(#am3-arrow)"/><text class="am-step" x="488.9" y="234" text-anchor="end">5</text></g><g data-step="5"><text x="309.4" y="270" text-anchor="middle">送信済みにする</text><path class="am-edge" d="M378.4,280 L242.4,280" marker-end="url(#am3-arrow)"/><text class="am-step" x="372.4" y="274" text-anchor="end">6</text></g></svg></figure></div>
-</section>
-<section class="am-panel am-span-wide" id="panel-D" style="grid-column: span 2">
-<header class="am-panel-head"><span class="am-panel-id">D</span><h2>二重書き込みとの比較</h2></header>
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>各パケットは1つずつ役割を持つ</h2></header>
 <div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>観点</th>
-<th>二重書き込み</th>
-<th>Outbox</th>
+<th>順</th>
+<th>パケット</th>
+<th>送信側</th>
+<th>役割</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>DBだけ更新される</td>
-<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>起きる</span></td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>起きない</span></td>
+<td>1</td>
+<td>SYN</td>
+<td>クライアント</td>
+<td>自分の初期番号xを伝える</td>
 </tr>
 <tr>
-<td>イベントの遅れ</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>ほぼない</span></td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>リレーの間隔だけ遅れる</span></td>
+<td>2</td>
+<td>SYN-ACK</td>
+<td>サーバー</td>
+<td>xの受信を伝え、自分の初期番号yを伝える</td>
 </tr>
 <tr>
-<td>同じイベントの重複</td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>再送すると起きる</span></td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>起きる</span></td>
-</tr>
-<tr>
-<td>部品の数</td>
-<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>少ない</span></td>
-<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>リレーが増える</span></td>
+<td>3</td>
+<td>ACK</td>
+<td>クライアント</td>
+<td>yの受信を伝える</td>
 </tr>
 </tbody></table></div>
 </div></div>
 </section>
-<section class="am-panel" id="panel-E">
-<header class="am-panel-head"><span class="am-panel-id">E</span><h2>リレーの作り方</h2></header>
+<section class="am-panel" id="panel-D">
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>2回では足りない</h2></header>
 <div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>方式</th>
-<th>読み方</th>
-<th>注意点</th>
+<th>確認する内容</th>
+<th>2回</th>
+<th>3回</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>ポーリング</td>
-<td>一定の間隔で未送信の行をSELECTする</td>
-<td>DBに読み込みの負荷がかかる</td>
+<td>クライアントからサーバーへ届く</td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span></span></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span></span></td>
 </tr>
 <tr>
-<td>CDC</td>
-<td>DBの変更ログを読む（例：Debezium）</td>
-<td>変更ログを読む仕組みを運用する</td>
+<td>サーバーからクライアントへ届く</td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span></span></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span></span></td>
+</tr>
+<tr>
+<td>yが届いたことをサーバーが知る</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span></span></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span></span></td>
+</tr>
+<tr>
+<td>古い重複SYNによる誤接続を防ぐ</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span></span></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span></span></td>
 </tr>
 </tbody></table></div>
 </div></div>
-</section>
-<section class="am-panel am-span-wide" id="panel-F" style="grid-column: span 2">
-<header class="am-panel-head"><span class="am-panel-id">F</span><h2>受け手の条件</h2></header>
-<div class="am-panel-body"><div class="am-callout am-callout--warn" role="note"><div class="am-callout-title">重複は防げない</div><div class="am-callout-body am-md"><p>リレーは、送ったあとで「送信済み」と記録する前に落ちることがある。
-そのときは同じイベントをもう一度送る。
-受け手はイベントのIDで重複を捨て、冪等に処理する。</p>
-</div></div></div>
 </section>
 </div>
 </div>
 </main>
 <footer class="am-colophon">explain 0.4.0 で生成 · 2026-10-04 22:27</footer>
 <textarea id="am-source" hidden readonly aria-hidden="true">---
-title: Transactional Outbox
-subtitle: DBの更新とイベントの送信を食い違わせない
-cols: 3
+title: TCPの3ウェイハンドシェイク
+subtitle: 接続を確立するまでの3回のやりとり
+cols: 2
 ---
+クライアントとサーバーは3回のパケット交換で接続を確立する。そのあとでデータを送り始める。
 
-Transactional Outboxでは、業務データとイベントを同じトランザクションでDBに書く。
-別のプロセスがoutboxテーブルを読み、ブローカーへ送る。
-DBの更新とイベントの送信が食い違わなくなる。
-
-## A 二重書き込みの問題 {span=3}
-```flow LR
-(注文API) -&gt; [(orders)]: INSERT
-(注文API) --&gt; ブローカー: publish（失敗しうる）
-ブローカー -&gt; 在庫サービス
+## 3回の交換で双方向の通信路ができる {span=2}
+```callout
+クライアントがSYNを送り、サーバーがSYN-ACKを返す。最後にクライアントがACKを返す。この3回で、両側が互いの初期シーケンス番号を受け取ったと確認できる。
 ```
 
-DBへの書き込みとブローカーへの送信は、1つのトランザクションにできない。
-DBに書いたあとで送信に失敗すると、在庫サービスは注文を知らないままになる。
-
-## B Outboxを使う形 {span=3}
-```flow LR
-(注文API) -&gt; [(orders)]: INSERT
-(注文API) +-&gt; +[(outbox)]: INSERT
-group 1つのトランザクション: orders, outbox
-outbox +-&gt; +リレー: 未送信の行を読む
-リレー +-&gt; ブローカー: publish
-ブローカー -&gt; 在庫サービス
-```
-
-注文APIは、ordersとoutboxに同じトランザクションで書く。
-リレーはoutboxの未送信の行を読み、ブローカーへ送る。
-
-## C 送信の順序
+## パケットはSYN、SYN-ACK、ACKの順に流れる {span=2}
 ```sequence num
-注文API -&gt; DB: ordersとoutboxにINSERT
-DB --&gt; 注文API: COMMIT
-リレー -&gt; DB: 未送信の行を読む
-リレー -&gt; ブローカー: publish
-ブローカー --&gt; リレー: ack
-リレー -&gt; DB: 送信済みにする
+participants: クライアント, サーバー
+note サーバー: LISTEN
+== 接続の確立 ==
+クライアント -&gt; サーバー: SYN（seq=x）
+note クライアント: SYN-SENT
+サーバー --&gt; クライアント: SYN-ACK（seq=y, ack=x+1）
+note サーバー: SYN-RECEIVED
+クライアント -&gt; サーバー: ACK（seq=x+1, ack=y+1）
+note クライアント, サーバー: ESTABLISHED
+== データ転送 ==
+クライアント -&gt; サーバー: データ
 ```
+xとyは、各側がランダムに選ぶ初期シーケンス番号です。
 
-## D 二重書き込みとの比較 {span=2}
-| 観点 | 二重書き込み | Outbox |
-| --- | --- | --- |
-| DBだけ更新される | no 起きる | ok 起きない |
-| イベントの遅れ | ok ほぼない | warn リレーの間隔だけ遅れる |
-| 同じイベントの重複 | warn 再送すると起きる | warn 起きる |
-| 部品の数 | ok 少ない | warn リレーが増える |
+## 各パケットは1つずつ役割を持つ
+| 順 | パケット | 送信側 | 役割 |
+|---|---|---|---|
+| 1 | SYN | クライアント | 自分の初期番号xを伝える |
+| 2 | SYN-ACK | サーバー | xの受信を伝え、自分の初期番号yを伝える |
+| 3 | ACK | クライアント | yの受信を伝える |
 
-## E リレーの作り方
-| 方式 | 読み方 | 注意点 |
-| --- | --- | --- |
-| ポーリング | 一定の間隔で未送信の行をSELECTする | DBに読み込みの負荷がかかる |
-| CDC | DBの変更ログを読む（例：Debezium） | 変更ログを読む仕組みを運用する |
-
-## F 受け手の条件 {span=2}
-```callout warn 重複は防げない
-リレーは、送ったあとで「送信済み」と記録する前に落ちることがある。
-そのときは同じイベントをもう一度送る。
-受け手はイベントのIDで重複を捨て、冪等に処理する。
-```
+## 2回では足りない
+| 確認する内容 | 2回 | 3回 |
+|---|---|---|
+| クライアントからサーバーへ届く | ok | ok |
+| サーバーからクライアントへ届く | ok | ok |
+| yが届いたことをサーバーが知る | no | ok |
+| 古い重複SYNによる誤接続を防ぐ | no | ok |
 </textarea>
 <script>
 (() => {

@@ -15,19 +15,49 @@ The plugin ships the `explain` skill and a single-file build of the CLI (`skills
 
 ## Demo
 
-Both demos explain the Transactional Outbox pattern.
+Every demo below was rendered by the plugin's bundled CLI. Each image links to the generated file, and each script is the Markdown the agent wrote.
 
-### Explainer page (`explain render`)
+### Explainer pages (`explain render`)
 
-Built from [transactional-outbox.md](docs/demo/transactional-outbox.md). The output is [transactional-outbox.html](docs/demo/transactional-outbox.html).
+#### Transactional Outbox
+
+A before/after flow with an added group, a sequence, and a comparison table. Script: [transactional-outbox.md](docs/demo/transactional-outbox.md). Output: [transactional-outbox.html](docs/demo/transactional-outbox.html).
 
 [![Explainer page for Transactional Outbox](docs/demo/transactional-outbox.png)](docs/demo/transactional-outbox.html)
 
-### Explainer video (`explain video --mp4`)
+#### OAuth 2.0 authorization code flow
 
-Built from [transactional-outbox.video.md](docs/demo/transactional-outbox.video.md). The GIF below plays at 2x speed without audio. Click it to open the [MP4 with narration](docs/demo/transactional-outbox.video.mp4).
+A 13-step sequence across five actors, split into phases, with tables of roles and safeguards. Script: [oauth2-authorization-code.md](docs/demo/oauth2-authorization-code.md). Output: [oauth2-authorization-code.html](docs/demo/oauth2-authorization-code.html).
+
+[![Explainer page for the OAuth 2.0 authorization code flow](docs/demo/oauth2-authorization-code.png)](docs/demo/oauth2-authorization-code.html)
+
+#### TCP three-way handshake
+
+A sequence with connection states as notes, and a table of why two messages are not enough. Script: [tcp-handshake.md](docs/demo/tcp-handshake.md). Output: [tcp-handshake.html](docs/demo/tcp-handshake.html).
+
+[![Explainer page for the TCP three-way handshake](docs/demo/tcp-handshake.png)](docs/demo/tcp-handshake.html)
+
+#### How MP4 export got three times faster
+
+A flow of the export pipeline, measured times as `limits` bars, and a table of what helped. Script: [mp4-export-speedup.md](docs/demo/mp4-export-speedup.md). Output: [mp4-export-speedup.html](docs/demo/mp4-export-speedup.html).
+
+[![Explainer page for the MP4 export speed-up](docs/demo/mp4-export-speedup.png)](docs/demo/mp4-export-speedup.html)
+
+### Explainer videos (`explain video --mp4`)
+
+The GIFs play at 2x speed without audio. Click one to open the MP4 with narration.
+
+#### Transactional Outbox
+
+Script: [transactional-outbox.video.md](docs/demo/transactional-outbox.video.md).
 
 [![Explainer video for Transactional Outbox](docs/demo/transactional-outbox.video.gif)](docs/demo/transactional-outbox.video.mp4)
+
+#### DNS name resolution
+
+The flow grows one step per narration line, the camera follows each server named in the narration, and the table reveals one row at a time. Script: [dns-resolution.video.md](docs/demo/dns-resolution.video.md).
+
+[![Explainer video for DNS name resolution](docs/demo/dns-resolution.video.gif)](docs/demo/dns-resolution.video.mp4)
 
 ## What it does
 
