@@ -13,6 +13,7 @@ import { COMPONENTS } from './components/index.js';
 import { THEMES } from './themes/index.js';
 import { renderVideo } from './video/render.js';
 import { serveWatch } from './watch.js';
+import { fileStamp, clock } from './time.js';
 import { pickProvider, compressAudio, TtsError, VOICES } from './video/tts.js';
 import { exportMp4, ExportError } from './video/export.js';
 import { explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from './config.js';
@@ -203,11 +204,7 @@ function cmdRender(src, opts, { print, fail, env, cwd }) {
   } catch (e) {
     return reportError(e, fail);
   }
-  const file = opts.out
-    ? resolve(cwd ?? process.cwd(), opts.out)
-    : join(explainHome(env), 'pages', `${slug(result.meta.title)}-${stamp()}.html`);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, result.html);
+  const file = writeOutput(result.html, { dir: 'pages', title: result.meta.title, out: opts.out, env, cwd });
 
   const comps = Object.entries(result.stats.components).map(([k, v]) => `${k}×${v}`).join(' ');
   print(`✓ ${file}`);
@@ -242,7 +239,7 @@ async function cmdWatch(arg, opts, { print, fail, env, cwd, signal }) {
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, result.html);
       }
-      print(`✓ ${new Date().toTimeString().slice(0, 8)} 作り直しました · パネル ${result.stats.panels} 枚`);
+      print(`✓ ${clock()} 作り直しました · パネル ${result.stats.panels} 枚`);
       printWarnings(result.warnings, print, result.meta.style);
       return result.html;
     } catch (e) {
@@ -302,11 +299,7 @@ async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, 
     }
     return reportError(e, fail);
   }
-  const file = opts.out
-    ? resolve(cwd ?? process.cwd(), opts.out)
-    : join(explainHome(env), 'videos', `${slug(result.meta.title)}-${stamp()}.html`);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, result.html);
+  const file = writeOutput(result.html, { dir: 'videos', title: result.meta.title, out: opts.out, env, cwd });
   print(`✓ ${file}`);
   print(`  video · 場面 ${result.stats.panels} 個 · ナレーション ${result.beats} 文 · ${result.duration.toFixed(1)} 秒 · 音声：${result.voiceName}`);
   printWarnings(result.warnings, print, result.meta.style);
@@ -441,9 +434,14 @@ function slug(title) {
   return s || 'page';
 }
 
-function stamp(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+// -o があればそこへ、なければ EXPLAIN_HOME/<dir>/<題名>-<日時>.html へ書き、書いたパスを返す。
+function writeOutput(html, { dir, title, out, env, cwd }) {
+  const file = out
+    ? resolve(cwd ?? process.cwd(), out)
+    : join(explainHome(env), dir, `${slug(title)}-${fileStamp()}.html`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, html);
+  return file;
 }
 
 function openFile(file) {

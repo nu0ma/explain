@@ -1,6 +1,6 @@
 // 原稿 → 1 ファイルの HTML。流れ：parse → STE 検査 → パネルを描画（Markdown / 部品 / raw）→ テンプレートに当てはめる → CSS とランタイムをインライン化。
 
-import { parseDoc, ParseError, CHOICES } from './parse.js';
+import { parseDoc, applyOverrides, ParseError } from './parse.js';
 import { md } from './markdown.js';
 import { COMPONENTS, RAW_LANGS, ComponentError } from './components/index.js';
 import { TEMPLATES } from './templates/index.js';
@@ -8,6 +8,7 @@ import { pageCss } from './themes/index.js';
 import { lintDoc } from './lint/ste.js';
 import { esc } from './svg/text.js';
 import { VERSION, RUNTIME_JS } from './assets.js';
+import { timestamp } from './time.js';
 
 export class RenderError extends Error {
   constructor(message, { line, component, example } = {}) {
@@ -42,13 +43,7 @@ const SCRIPT_LIKE = /<script\b|<[^>]+\son[a-z]+\s*=|javascript:/i;
 export function renderDoc(source, overrides = {}, defaults = {}) {
   const doc = parseDoc(source, { defaults });
   const { static: staticFlag, ...rest } = overrides;
-  for (const [key, value] of Object.entries(rest)) {
-    if (value === undefined) continue;
-    if (CHOICES[key] && !CHOICES[key].includes(String(value))) {
-      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${CHOICES[key].join(' | ')}`, 0);
-    }
-    doc.meta[key] = value;
-  }
+  applyOverrides(doc.meta, rest);
   if (doc.meta.template === 'video') throw new ParseError('template: video は動画の原稿です。explain video で作ってください', 0);
   const isStatic = staticFlag === true || doc.meta.static === 'true';
   // 静的出力は JS で配色を切り替えられないので、OS の設定（prefers-color-scheme）に従わせる。
@@ -91,11 +86,6 @@ function renderFence(block, ctx) {
       example: comp.example,
     });
   }
-}
-
-export function timestamp(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function shell({ meta, body, source, isStatic }) {

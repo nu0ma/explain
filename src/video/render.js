@@ -1,12 +1,13 @@
 // 動画の原稿 → 1 ファイルの再生ページ。画面はページの部品を使い回す。タイムラインは各ナレーションの音声の長さ（または見積もり）で決まる。
 // 再生ページの render(t) は決定的で、同じ時刻には必ず同じフレームを描く。MP4 の書き出しではこれをフレームごとに呼ぶ。
-import { renderBlocks, LintError, timestamp } from '../render.js';
+import { renderBlocks, LintError } from '../render.js';
+import { timestamp } from '../time.js';
 import { pageCss } from '../themes/index.js';
 import { lintDoc } from '../lint/ste.js';
 import { esc } from '../svg/text.js';
 import { VERSION, VIDEO_CSS, VIDEO_JS } from '../assets.js';
 import { parseVideo, buildTimeline, estimateSeconds, allBeats, VIDEO_THEMES } from './script.js';
-import { CHOICES, ParseError } from '../parse.js';
+import { CHOICES, ParseError, applyOverrides } from '../parse.js';
 import { synthAll, mixTrack, SAMPLE_RATE } from './tts.js';
 
 // 再生ページのコントロールの文言。
@@ -18,14 +19,7 @@ export async function renderVideo(source, { provider = null, cacheDir, defaults 
   const video = parseVideo(source, { defaults });
   const { meta } = video;
   // コマンドラインの引数は原稿と設定より優先する。
-  const allowed = { ...CHOICES, theme: VIDEO_THEMES };
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) continue;
-    if (allowed[key] && !allowed[key].includes(String(value))) {
-      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${allowed[key].join(' | ')}`, 0);
-    }
-    meta[key] = value;
-  }
+  applyOverrides(meta, overrides, { ...CHOICES, theme: VIDEO_THEMES });
 
   if (meta.static === 'true') throw new ParseError('動画の再生には JavaScript が必要なため、static: true は使えません', 0);
 

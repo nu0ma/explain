@@ -33,6 +33,17 @@ const ATTR_BLOCK = /\s*\{([^{}]*)\}\s*$/;
 const PANEL_ID = /^([A-Z][0-9]?)\s+(.+)$/;
 const ATTR_TOKEN = /([\w-]+)(?:=("[^"]*"|'[^']*'|\S+))?/g;
 
+// コマンドラインの引数で meta を上書きする。undefined のキーは飛ばし、選択肢のあるキーは値を確かめる。
+export function applyOverrides(meta, overrides, allowed = CHOICES) {
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) continue;
+    if (allowed[key] && !allowed[key].includes(String(value))) {
+      throw new ParseError(`${key} の値 "${value}" は使えません。選択肢：${allowed[key].join(' | ')}`, 0);
+    }
+    meta[key] = value;
+  }
+}
+
 // defaults：ユーザー設定の既定値（theme / mode / style など）。原稿の frontmatter に明示した値が優先される。
 // choices で一部のキーの選択肢を広げられる（動画の原稿では theme: 3b1b も使える）。
 export function parseDoc(source, { defaults = {}, choices = {} } = {}) {

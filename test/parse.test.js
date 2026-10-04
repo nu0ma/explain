@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDoc, ParseError } from '../src/parse.js';
+import { parseDoc, applyOverrides, ParseError } from '../src/parse.js';
 
 const SAMPLE = `---
 template: sheet
@@ -110,4 +110,21 @@ test('CRLF の改行でも正しく読む', () => {
   const doc = parseDoc('---\r\ntitle: T\r\n---\r\n## A\r\n本文\r\n');
   assert.equal(doc.meta.title, 'T');
   assert.equal(doc.panels[0].blocks[0].text.trim(), '本文');
+});
+
+test('applyOverrides: undefined は飛ばし、選択肢にない値はエラー', () => {
+  const cases = [
+    { name: '上書き', req: { theme: 'shadcn', mode: undefined }, want: { theme: 'shadcn', mode: 'auto' } },
+    { name: '選択肢のないキー', req: { title: '題名' }, want: { theme: 'blueprint', mode: 'auto', title: '題名' } },
+    { name: '不正な値', req: { theme: 'neon' }, wantErr: /theme の値 "neon" は使えません。選択肢：blueprint \| shadcn/ },
+  ];
+  for (const { name, req, want, wantErr } of cases) {
+    const meta = { theme: 'blueprint', mode: 'auto' };
+    if (wantErr) {
+      assert.throws(() => applyOverrides(meta, req), wantErr, name);
+      continue;
+    }
+    applyOverrides(meta, req);
+    assert.deepEqual(meta, want, name);
+  }
 });
