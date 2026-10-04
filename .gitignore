@@ -9,3 +9,4 @@ apm_modules/
 
 # claude plugin eval の結果
 evals/results/
+.claude/worktrees/
