@@ -132,3 +132,54 @@ test('formatWarning: 行番号・規則・内容・言い換え', () => {
   const s = formatWarning({ line: 4, rule: 'verbose', message: '冗長な表現「確認を行う」（を行う）', suggestion: '確認する' });
   assert.equal(s, 'L4 [verbose] 冗長な表現「確認を行う」（を行う） → 確認する');
 });
+
+// yomiyasu（https://github.com/nanaism/yomiyasu）の README の「比較例1」から引いた修正前と修正後の文。
+const YOMIYASU_BEFORE = `## A
+ここで**重要なのは、単なるパーツの共通化ではなく、組織の意思決定OSとしてのガバナンス**です。
+
+従来の開発では、画面ごとに手触り感を探りながらパーツを作っていました。しかし、片方だけを見て画面を作ると、もう片方のアクセシビリティが**静かに壊れます**。そこでデザインシステムという**強固な土台**を置くことで、開発者の**解像度が一段上がります**。
+
+- **開発速度の加速**: コンポーネントを再利用することで、時間を溶かさずに済みます。
+- **仕様の収斂**: 判断に迷うスタイルは、あらかじめ**共通側に倒します**。
+
+もちろん、これは「デザイナーが不要になる」ことを意味しません。日々の開発に**地味に効いてきます**。ぜひ参考にしてみてください！
+`;
+
+const YOMIYASU_AFTER = `## A
+デザインシステムを導入する目的は、ボタンや入力欄などのUIパーツを一から作成する負担を減らし、画面全体の情報設計に集中することにあります。
+
+導入によってデザイン作業そのものが不要になるわけではありません。しかし、単純なパーツ作成にかかる工数を削減することで、本来注力すべき使い勝手の検証や品質向上に時間を充てられるようになります。
+`;
+
+const AI_RULES = new Set(['slop-word', 'metaphor-verb', 'filler', 'emoji']);
+const aiFindings = (src) => lint(src).filter((w) => AI_RULES.has(w.rule)).map((w) => `${w.rule}:${w.message.match(/「([^」]+)」/)[1]}`);
+
+test('AI の文章に多い表現：yomiyasu の修正前の文で検出し、修正後の文では検出しない', () => {
+  assert.deepEqual(aiFindings(YOMIYASU_BEFORE), [
+    'filler:重要なのは',
+    'slop-word:意思決定OS',
+    'slop-word:手触り',
+    'metaphor-verb:静かに壊れ',
+    'slop-word:解像度が高い',
+    'metaphor-verb:時間を溶かさ',
+    'metaphor-verb:側に倒し',
+    'metaphor-verb:地味に効い',
+    'filler:ぜひ〜してみてください',
+  ]);
+  assert.deepEqual(aiFindings(YOMIYASU_AFTER), []);
+});
+
+test('AI の文章に多い表現：技術文書で文字どおりに使う語や記号は検出しない', () => {
+  const cases = [
+    { name: '絵文字', req: '## A\nデプロイした 🚀', want: ['emoji:🚀'] },
+    { name: '異体字セレクタつきの記号', req: '## A\n注意 ⚠️ を読む。', want: ['emoji:⚠️'] },
+    { name: '状態語とキーの記号', req: '## A\n| 項目 | 結果 |\n|---|---|\n| 速度 | ✓ 速い |\n\n⌘ と ✗ と ⚠ を押す。', want: [] },
+    { name: '画面の解像度', req: '## A\n画面の解像度は 1920 × 1080 にする。', want: [] },
+    { name: 'データの破損', req: '## A\n書き込み中に止まるとデータが壊れる。', want: [] },
+    { name: '文中の「重要なのは」', req: '## A\nここで確かめて重要なのは順序だと分かった。', want: [] },
+    { name: 'コードと取り消し線は対象外', req: '## A\n`手触り` と ~~腹落ち~~ を例に挙げる。', want: [] },
+    { name: '見出しは対象外', req: '## 腹落ちする設計\n本文。', want: [] },
+    { name: 'callout も対象', req: '## A\n```callout info 注\nいかがでしたか？\n```', want: ['filler:いかがでしたでしょうか'] },
+  ];
+  for (const { name, req, want } of cases) assert.deepEqual(aiFindings(req), want, name);
+});

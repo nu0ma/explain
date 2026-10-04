@@ -1,8 +1,10 @@
 // STE（Simplified Technical English）の考え方を日本語に当てはめた文章検査。原稿の説明文だけを対象にする。
 // 規則：文の長さ、段落の文の数、冗長な動詞句、ぼかし表現、強調・誇張、「の」の連続。すべて警告で、厳しさは style で決める。
+// AI が書いた日本語に多い語・比喩の動詞・定型句・絵文字も警告する（一覧は yomiyasu から移植。wordlist.yomiyasu.js）。
 // 対象外：コードとインラインコード、~~取り消し線~~（悪い例の提示）、状態が no の表の行、見出し、callout 以外の部品。
 
 import { JA_VERBOSE, JA_HEDGES, JA_EMPHASIS } from './wordlist.ja.js';
+import { JA_SLOP_WORDS, JA_METAPHOR_VERBS, JA_FILLERS, EMOJI } from './wordlist.yomiyasu.js';
 import { isCJK } from '../svg/text.js';
 
 export const LIMITS = Object.freeze({ procedural: 35, descriptive: 45 });
@@ -112,7 +114,7 @@ function checkUnit(text, line, kind, guess, out) {
       out.push({ line, rule: 'sentence-length', message: `${kind === 'procedural' ? '手順の文' : '文'}が ${count} 字です（上限 ${limit}）：「${preview(s)}」`, suggestion: '文を分ける' });
     }
   }
-  const lexical = [...verbose(text), ...(guess ? [] : hedges(text)), ...emphasis(text)];
+  const lexical = [...verbose(text), ...(guess ? [] : hedges(text)), ...emphasis(text), ...aiStyle(text, sentences)];
   out.push(...lexical.sort((a, b) => a.index - b.index).map(({ index, ...w }) => ({ line, ...w })));
   for (const m of text.matchAll(NO_CHAIN)) {
     const n = (m[0].match(/の/g) ?? []).length;
@@ -142,6 +144,28 @@ function hedges(text) {
   return JA_HEDGES.flatMap(({ re, label }) => [...text.matchAll(re)].map((m) => ({
     index: m.index, rule: 'hedge', message: `ぼかし表現「${m[0]}」（${label}）`, suggestion: '言い切るか根拠を書く。推測なら行に「推測：」と書く',
   })));
+}
+
+// AI が書いた日本語に多い表現。定型句は文の頭か終わりにあるときだけ数える。
+function aiStyle(text, sentences) {
+  const words = JA_SLOP_WORDS.flatMap(({ re, label }) => [...text.matchAll(re)].map((m) => ({
+    index: m.index, rule: 'slop-word', message: `AI の文章に多い語「${label}」`, suggestion: '文字どおりの意味でなければ、ふだんの言葉に置き換える',
+  })));
+  const verbs = JA_METAPHOR_VERBS.flatMap(({ re, label }) => [...text.matchAll(re)].map((m) => ({
+    index: m.index, rule: 'metaphor-verb', message: `比喩の動詞「${m[0]}」（${label}）`, suggestion: '何が起きるかを、ふだんの動詞で書く',
+  })));
+  let offset = 0;
+  const fillers = sentences.flatMap((s) => {
+    const at = text.indexOf(s, offset);
+    offset = at + s.length;
+    return JA_FILLERS.filter(({ re }) => re.test(s)).map(({ label }) => ({
+      index: at, rule: 'filler', message: `定型の前置き・締め「${label}」：「${preview(s)}」`, suggestion: '削って本題から書く',
+    }));
+  });
+  const emoji = [...text.matchAll(EMOJI)].map((m) => ({
+    index: m.index, rule: 'emoji', message: `絵文字「${m[0]}」`, suggestion: '削るか、言葉で書く',
+  }));
+  return [...words, ...verbs, ...fillers, ...emoji];
 }
 
 function emphasis(text) {
