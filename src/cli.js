@@ -96,7 +96,7 @@ Client -> Server: ACK
 - となりあう場面に同じ名前のノードや参加者があると、前の位置から次の位置へなめらかに動く（場面をまたぐ変形）。
 - 音声：--voice auto（既定。ELEVENLABS_API_KEY があれば ElevenLabs、なければ OS の読み上げ）| elevenlabs | system | off。
   ElevenLabs の声は環境変数 ELEVENLABS_VOICE_ID で指定できる。
-- 出力先は ~/.explain-cli/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg、Node 22 以上が必要）。
+- 出力先は ~/.explain-cli/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg が必要）。
 - 動画は再生に JavaScript が要るため、--static は使えない。`;
 
 export async function main(argv, io = {}) {

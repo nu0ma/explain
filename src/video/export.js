@@ -37,7 +37,6 @@ export function findChrome(env = process.env, platform = process.platform) {
 }
 
 export async function exportMp4(htmlFile, mp4File, { wav, env = process.env, onProgress = () => {} } = {}) {
-  if (typeof WebSocket === 'undefined') throw new ExportError('MP4 の書き出しには Node.js 22 以上（組み込みの WebSocket）が必要です');
   if (!hasCommand('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
   const chromePath = findChrome(env);
   if (!chromePath) throw new ExportError('Chrome / Chromium / Edge が見つかりません。環境変数 EXPLAIN_CHROME でブラウザのパスを指定できます');

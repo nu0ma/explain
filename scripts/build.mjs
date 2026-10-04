@@ -29,7 +29,7 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node20',
+  target: 'node24',
   legalComments: 'eof',
   banner: { js: '// explain CLI — scripts/build.mjs が生成。直接編集しない。' },
   plugins: [inlineAssets],
