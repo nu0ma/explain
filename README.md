@@ -28,6 +28,6 @@ explain config                                      # 設定の確認と変更
 - `npm run build` で、依存を含めた 1 ファイルの `dist/explain.mjs` ができる。Node 20 以上があれば単体で動く。
 - 動画の音声は ElevenLabs（`ELEVENLABS_API_KEY`）、macOS の `say`（Kyoko などの日本語の声）、Linux の `espeak-ng` の順に使う。
 
-## ライセンス
+## License
 
-MIT です。著作権表示は [LICENSE](LICENSE) を見てください。
+MIT. See [LICENSE](LICENSE).
