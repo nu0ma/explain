@@ -1,7 +1,9 @@
 // Bundle the CLI into the single file dist/explain.mjs.
 // The output references neither node_modules nor src/, so it runs on its own wherever Node is installed.
 import { build, type Plugin } from 'esbuild';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -23,9 +25,11 @@ const inlineAssets: Plugin = {
   },
 };
 
+const outfile = fileURLToPath(new URL('../dist/explain.mjs', import.meta.url));
+
 await build({
   entryPoints: [fileURLToPath(new URL('../bin/explain.ts', import.meta.url))],
-  outfile: fileURLToPath(new URL('../dist/explain.mjs', import.meta.url)),
+  outfile,
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -37,3 +41,10 @@ await build({
   plugins: [inlineAssets],
   logLevel: 'info',
 });
+
+// The explain-for-understanding skill runs its own copy of the bundle. Keep it in sync when the skill is installed.
+const skillScripts = join(homedir(), '.claude/skills/explain-for-understanding/scripts');
+if (existsSync(skillScripts)) {
+  copyFileSync(outfile, join(skillScripts, 'explain.mjs'));
+  console.log(`  copied to ${join(skillScripts, 'explain.mjs')}`);
+}
