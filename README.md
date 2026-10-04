@@ -1,10 +1,13 @@
 # explain
 
-A Claude Code plugin that lets the agent explain things as a self-contained, single-file explainer HTML page or a 3Blue1Brown-style explainer video. Ask "図にして" or "動画で説明して", and the agent writes a Markdown script, renders it with the bundled CLI, and fixes the reported warnings. The CLI also works on its own.
+**Instant explainer pages and narrated videos for Claude Code.**
 
-It is fast enough to sit inside the agent's loop: a page renders in under 0.1 s, and an 84-second 1080p narrated video exports to MP4 in about 17 s. It needs only Node: no runtime dependencies, no API keys, and no external TTS service.
+Say "図にして" and get a diagram. Say "動画で説明して" and get a narrated video.
 
-It is a personal tool rebuilt for one engineer who works in Japanese, so both the generated output and the CLI messages are Japanese only.
+- **Instant**: a page in 0.08 s. An 84-second 1080p video in 17 s.
+- **Zero dependencies**: one 177 KB file. Just Node. No API keys.
+- **Agent-native**: the agent writes a Markdown script. The CLI lays it out, checks the prose, and tells the agent what to fix.
+- **Japanese first**: built for one engineer who works in Japanese. Output and messages are Japanese only.
 
 ## Install as a Claude Code plugin
 
