@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable, Writable } from 'node:stream';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.js';
@@ -361,4 +361,11 @@ test('cli cache: 場所と大きさを出し、clear で消す。知らない操
   assert.match(clear.out, /✓ 音声のキャッシュを消しました/);
   assert.match((await run(['cache'])).out, / {2}0 件、0\.0 MB/);
   assert.equal((await run(['cache', 'drop'])).code, 2);
+});
+
+test('e2e: sayは「-」で始まる文もオプションではなく読み上げる文として扱う', { skip: !E2E }, async () => {
+  const out = join(dir, 'injected.aiff');
+  const [clip] = await synthAll([`--output-file=${out} こんにちは`], pickProvider('say'), {});
+  assert.ok(clip.length > 0);
+  assert.equal(existsSync(out), false, '文で指定した場所にファイルを書かない');
 });

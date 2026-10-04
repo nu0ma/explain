@@ -30,8 +30,11 @@ export function pickProvider(choice, { platform = process.platform, which = hasC
     name: 'say',
     id: `say:${voice ?? 'default'}`,
     concurrency: 4,
+    // 文は引数で渡さず、ファイルから読ませる。「-」で始まる文をsayがオプションとして解釈しないようにするため。
     synth: (text) => withTemp(async (file) => {
-      await run('say', [...(voice ? ['-v', voice] : []), '-o', file, '--file-format=WAVE', `--data-format=LEI16@${SAMPLE_RATE}`, text]);
+      const input = file.replace(/\.wav$/, '.txt');
+      writeFileSync(input, text);
+      await run('say', [...(voice ? ['-v', voice] : []), '-o', file, '--file-format=WAVE', `--data-format=LEI16@${SAMPLE_RATE}`, '-f', input]);
       return readWav(readFileSync(file));
     }),
   };
