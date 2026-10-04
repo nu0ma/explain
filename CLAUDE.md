@@ -1,10 +1,15 @@
 # explain-cli
 
+## コミットメッセージとPRのタイトル
+
+コミットメッセージとPRのタイトルは英語で書く。
+形式はConventional Commits（`feat: ...`、`fix: ...`など）に従う。
+
 ## 日本語の文章
 
 このリポジトリで日本語の文章を書くときは、すべて`yomiyasu`スキルで推敲してから出す。
 原稿の例（`examples/`）、CLIのヘルプとメッセージ、コードのコメントが対象になる。
-テストの名前、コミットメッセージ、Issueのコメントも同じように扱う。
+テストの名前とIssueのコメントも同じように扱う。
 
 `yomiyasu`は`apm.yml`に書いてあり、`apm install --frozen`で`.claude/skills/yomiyasu/`に展開される。
 原稿の例を直したら`node bin/explain.js lint <原稿>`を実行し、警告が出ないことを確かめる。
