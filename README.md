@@ -25,7 +25,7 @@ explain config                                      # show and change settings
 ```
 
 - Output goes to `~/.explain-cli/pages/` and `~/.explain-cli/videos/`; settings live in `~/.explain-cli/config.json`. Set `EXPLAIN_HOME` to change the location.
-- `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 24 or later.
+- `pnpm run build` produces `dist/explain.mjs`, a single file that bundles all dependencies. It runs on its own with Node 22.13 or later.
 - Video narration uses ElevenLabs (`ELEVENLABS_API_KEY`) first, then macOS `say` (a Japanese voice such as Kyoko), then `espeak-ng` on Linux.
 
 ## License
