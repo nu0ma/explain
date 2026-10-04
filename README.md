@@ -7,7 +7,7 @@ A CLI that turns a Markdown script into a self-contained, single-file explainer 
 - Turns a PR's before and after, the flow of an incident, or a system's architecture into a one-page diagram.
 - Lays out diagrams (flow / sequence / tree, etc.) automatically: you only write the relationships.
 - Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
-- With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript (such as Pageshelf safe mode).
+- With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript.
 
 ## Usage
 
