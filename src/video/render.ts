@@ -39,7 +39,7 @@ interface PlayerSegment {
   start: number;
   end: number;
   title: string | undefined;
-  beats: { text: string; focus: string | null; reveal: number | null; start: number; end: number; html: string }[];
+  beats: { text: string; focus: string | null; reveal: number | null; start: number; end: number; caption: string }[];
 }
 
 interface PlayerData {
@@ -83,7 +83,7 @@ export async function renderVideo(
       start: s.start,
       end: s.end,
       title: i === 0 ? meta.title : s.title,
-      beats: s.beats.map((b, k) => ({ ...b, html: captionHtml(beatsOf(video, i)[k].raw) })),
+      beats: s.beats.map((b, k) => ({ ...b, caption: beatsOf(video, i)[k].raw })),
     })),
   };
   const total = video.scenes.length;
@@ -119,14 +119,6 @@ export function prepareVideo(
 }
 
 const beatsOf = (video: Video, i: number) => (i === 0 ? video.introBeats : video.scenes[i - 1].beats);
-
-// Captions: [name] becomes emphasized text.
-export function captionHtml(raw: string): string {
-  return raw.split(/(\[[^\]\n]+\])/).map((part) => {
-    const m = part.match(/^\[([^\]]+)\]$/);
-    return m ? `<b>${esc(m[1])}</b>` : esc(part);
-  }).join('');
-}
 
 function titleScene(meta: Meta, introHtml: string, { scenes, duration }: { scenes: number; duration: number }): string {
   const mmss = `${Math.floor(duration / 60)}:${String(Math.round(duration % 60)).padStart(2, '0')}`;

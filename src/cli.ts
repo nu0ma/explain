@@ -615,7 +615,8 @@ function writeOutput(
 
 function openFile(file: string): void {
   const [cmd, args]: [string, string[]] = process.platform === 'darwin' ? ['open', [file]]
-    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', file]]
+    // explorer opens the file with its default app without going through cmd, which would parse the path as a command line.
+    : process.platform === 'win32' ? ['explorer', [file]]
       : ['xdg-open', [file]];
   try {
     spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();

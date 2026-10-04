@@ -1,7 +1,7 @@
 // SVG layout is computed in Node, so real font metrics are not available. Estimate the width per character class.
 // Overestimating is safer: extra padding in a node is better than text overflowing its box.
 
-const CJK_RE = /[⺀-鿿가-힯豈-﫿︰-﹏＀-￯　-〿]/;
+const CJK_RE = /[⺀-鿿가-힯豈-﫿︰-﹏＀-￯]/;
 const NARROW = new Set('iljtfrI.,:;|!\'`()[]{}');
 const WIDE = new Set('mwMWOQGD@%&');
 
@@ -29,7 +29,7 @@ export function measure(str: unknown, size = 13, { mono = false }: MeasureOption
 
 // Split into unbreakable typesetting units: each full-width character is one unit, each run of non-space Latin text is one word.
 function tokenize(str: unknown): string[] {
-  return String(str).match(/[⺀-鿿가-힯豈-﫿︰-﹏＀-￯　-〿]|[^\s⺀-鿿가-힯豈-﫿︰-﹏＀-￯　-〿]+|\s+/g) ?? [];
+  return String(str).match(/[⺀-鿿가-힯豈-﫿︰-﹏＀-￯]|[^\s⺀-鿿가-힯豈-﫿︰-﹏＀-￯]+|\s+/g) ?? [];
 }
 
 export function wrap(str: unknown, maxWidth: number, size = 13, opts: MeasureOptions = {}): string[] {

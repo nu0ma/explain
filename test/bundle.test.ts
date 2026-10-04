@@ -25,7 +25,7 @@ test('bundle: ビルドした explain.mjs は単体で動く', () => {
     const src = '---\ntitle: ビルドのテスト\n---\n## A\n```flow\nA -> B\n```\n';
     const cases = [
       { name: 'ふつう', req: [], want: /<script>/ },
-      { name: '静的', req: ['--static'], want: /^(?![\s\S]*<script)/ },
+      { name: '静的', req: ['--static'], want: /^(?![\s\S]*<script)/i },
     ];
     for (const { name, req, want } of cases) {
       const out = join(dir, `${name}.html`);

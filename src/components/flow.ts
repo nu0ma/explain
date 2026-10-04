@@ -44,7 +44,7 @@ const BRACKETS: ReadonlyArray<{ open: string; close: string; shape: FlowShape }>
   { open: '{', close: '}', shape: 'diamond' },
 ];
 // Diff arrows (+-> added, x-> removed) are matched before the plain arrows.
-const ARROW = /^\s*(\+->|x->|-->|->)\s*/;
+const ARROW = /^\s*(\+->|x->|--?>)\s*/;
 const EDGE_DIFF: Partial<Record<string, FlowDiff>> = { '+->': 'add', 'x->': 'del' };
 // Node diff marks: + added, ~ changed, - removed.
 const NODE_DIFF: Partial<Record<string, FlowDiff>> = { '+': 'add', '~': 'chg', '-': 'del' };

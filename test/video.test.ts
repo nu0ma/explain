@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.ts';
-import { renderVideo, captionHtml, videoMode, VIDEO_UI } from '../src/video/render.ts';
+import { renderVideo, videoMode, VIDEO_UI } from '../src/video/render.ts';
 import type { RenderVideoOptions } from '../src/video/render.ts';
 import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, compressAudio, hasCommand, cacheStats, pruneCache, TtsError, SAMPLE_RATE } from '../src/video/tts.ts';
 import type { TtsProvider } from '../src/video/tts.ts';
@@ -115,10 +115,6 @@ test('buildTimeline: 書いた間の分だけ拍と場面の終わりが後ろ�
   assert.deepEqual([a.reveal, b.reveal], [2, null]);
 });
 
-test('captionHtml: HTML をエスケープし、[名前] を強調語にする', () => {
-  assert.equal(captionHtml('[Server] が <ACK> を返す'), '<b>Server</b> が &lt;ACK&gt; を返す');
-});
-
 // ── Audio ──
 test('wav と readWav で往復できる。mixTrack は開始時刻どおりに置く', () => {
   const samples = Int16Array.from([0, 1000, -1000, 32767]);
@@ -222,7 +218,7 @@ test('renderVideo: 音声なしでは見積もりの長さで再生ページを�
   assert.equal((r.html.match(/<section class="amv-scene/g) || []).length, 3, 'タイトル + 場面 2 つ');
   const data = JSON.parse(/id="amv-data">(.*?)<\/script>/.exec(r.html)?.[1] ?? '');
   assert.equal(data.segments.length, 3);
-  assert.equal(data.segments[1].beats[1].html, '<b>B</b> が ACK を返す。');
+  assert.equal(data.segments[1].beats[1].caption, '[B] が ACK を返す。');
   assert.equal(data.duration, r.duration);
   assert.doesNotMatch(r.html, /<audio/);
   assert.match(r.html, /window\.render = render/);
