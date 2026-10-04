@@ -13,7 +13,8 @@ import { synthAll, mixTrack, SAMPLE_RATE } from './tts.js';
 export const VIDEO_UI = Object.freeze({ play: '再生', pause: '一時停止', chapters: 'チャプター', seek: '再生位置' });
 
 // provider が null なら字幕だけを出し、長さは文字数から見積もる。
-export async function renderVideo(source, { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress } = {}) {
+// encodeAudio(wav) は埋め込む音声を { mime, data } に変える（null を返せば WAV のまま）。省略すると WAV を埋め込む。
+export async function renderVideo(source, { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null } = {}) {
   const video = parseVideo(source, { defaults });
   const { meta } = video;
   // コマンドラインの引数は原稿と設定より優先する。
@@ -45,6 +46,7 @@ export async function renderVideo(source, { provider = null, cacheDir, defaults 
   const timeline = buildTimeline(video, durations);
   const flat = [...timeline.title.beats, ...timeline.scenes.flatMap((s) => s.beats)];
   const wav = clips ? mixTrack(clips, flat.map((b) => b.start), timeline.duration) : null;
+  const audio = wav && ((encodeAudio && await encodeAudio(wav)) || { mime: 'audio/wav', data: wav });
 
   const stats = { panels: video.scenes.length, components: {} };
   const ctx = { seq: 0, stats };
@@ -64,7 +66,7 @@ export async function renderVideo(source, { provider = null, cacheDir, defaults 
     ...video.scenes.map((s, i) => scene(s, i, total, renderBlocks(s.blocks, ctx))),
   ].join('\n');
 
-  const html = shell({ meta, scenesHtml, data, wav, source });
+  const html = shell({ meta, scenesHtml, data, audio, source });
   return { html, wav, warnings, stats, meta, duration: timeline.duration, beats: beats.length };
 }
 
@@ -109,7 +111,7 @@ export function videoMode(meta) {
   return ['light', 'dark'].includes(meta.mode) ? meta.mode : 'auto';
 }
 
-function shell({ meta, scenesHtml, data, wav, source }) {
+function shell({ meta, scenesHtml, data, audio, source }) {
   const ui = VIDEO_UI;
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   return `<!doctype html>
@@ -143,7 +145,7 @@ ${scenesHtml}
 <span class="amv-brand">explain ${VERSION} · ${esc(timestamp())}</span>
 </div>
 <script type="application/json" id="amv-data">${json}</script>
-${wav ? `<audio id="amv-audio" preload="auto" src="data:audio/wav;base64,${wav.toString('base64')}"></audio>` : ''}
+${audio ? `<audio id="amv-audio" preload="auto" src="data:${audio.mime};base64,${audio.data.toString('base64')}"></audio>` : ''}
 <textarea id="am-source" hidden readonly aria-hidden="true">${esc(source)}</textarea>
 <script>
 ${VIDEO_JS}</script>

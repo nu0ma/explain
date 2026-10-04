@@ -201,6 +201,23 @@ export function mixTrack(clips, starts, duration) {
   return wav(track);
 }
 
+// 埋め込む音声を AAC（m4a）に圧縮する。WAV のままだと 1 秒あたり約 44 KB になる。
+// ffmpeg がないときや失敗したときは null を返し、呼び出し側は WAV のまま使う。
+export async function compressAudio(wavBuf, { has = hasCommand } = {}) {
+  if (!has('ffmpeg')) return null;
+  return withTemp(async (file) => {
+    const src = file.replace(/\.wav$/, '-in.wav');
+    const out = file.replace(/\.wav$/, '.m4a');
+    writeFileSync(src, wavBuf);
+    try {
+      await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', out]);
+    } catch {
+      return null;
+    }
+    return { mime: 'audio/mp4', data: readFileSync(out) };
+  });
+}
+
 export function wav(samples) {
   const buf = Buffer.alloc(44 + samples.length * 2);
   buf.write('RIFF', 0);

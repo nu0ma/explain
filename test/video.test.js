@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.js';
 import { renderVideo, captionHtml, videoMode, VIDEO_UI } from '../src/video/render.js';
-import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, TtsError, SAMPLE_RATE } from '../src/video/tts.js';
+import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, compressAudio, hasCommand, TtsError, SAMPLE_RATE } from '../src/video/tts.js';
 import { findChrome } from '../src/video/export.js';
 import { renderDoc } from '../src/render.js';
 import { ParseError } from '../src/parse.js';
@@ -230,12 +230,12 @@ function sink() {
   return { stream, get text() { return text; } };
 }
 
-async function run(args, { stdin = '', env = {}, ttsProvider = null } = {}) {
+async function run(args, { stdin = '', env = {}, ttsProvider = null, encodeAudio = null } = {}) {
   const out = sink();
   const err = sink();
   const code = await main(args, {
     stdout: out.stream, stderr: err.stream, stdin: Readable.from([stdin]),
-    env: { EXPLAIN_NO_OPEN: '1', EXPLAIN_HOME: dir, ...env }, cwd: dir, ttsProvider,
+    env: { EXPLAIN_NO_OPEN: '1', EXPLAIN_HOME: dir, ...env }, cwd: dir, ttsProvider, encodeAudio,
   });
   return { code, out: out.text, err: err.text };
 }
@@ -296,4 +296,32 @@ test('videoMode: light と dark はそのまま、それ以外は auto。3b1b �
     { req: { theme: '3b1b', mode: 'light' }, want: 'dark' },
   ];
   for (const { req, want } of cases) assert.equal(videoMode(req), want, JSON.stringify(req));
+});
+
+test('renderVideo: encodeAudio が返した形式で埋め込み、null なら WAV のまま。MP4 用の wav は常に WAV', async () => {
+  const cases = [
+    { name: '圧縮する', encodeAudio: async () => ({ mime: 'audio/mp4', data: Buffer.from('m4a') }), want: `data:audio/mp4;base64,${Buffer.from('m4a').toString('base64')}"` },
+    { name: '圧縮できない', encodeAudio: async () => null, want: 'data:audio/wav;base64,' },
+  ];
+  for (const { name, encodeAudio, want } of cases) {
+    const r = await renderVideo(SRC, { provider: fakeProvider(), encodeAudio });
+    assert.ok(r.html.includes(want), name);
+    assert.equal(readWav(r.wav).length, Math.ceil(r.duration * SAMPLE_RATE), name);
+  }
+});
+
+test('compressAudio: ffmpeg がなければ null。あれば AAC（m4a）にして小さくする', { skip: !hasCommand('ffmpeg') && 'ffmpeg がない' }, async () => {
+  assert.equal(await compressAudio(wav(new Int16Array(10)), { has: () => false }), null);
+  const samples = Int16Array.from({ length: SAMPLE_RATE * 2 }, (_, i) => Math.round(Math.sin(i / 10) * 8000));
+  const src = wav(samples);
+  const got = await compressAudio(src);
+  assert.equal(got.mime, 'audio/mp4');
+  assert.equal(got.data.toString('ascii', 4, 8), 'ftyp');
+  assert.ok(got.data.length < src.length / 3, `${got.data.length} < ${src.length / 3}`);
+});
+
+test('cli video: 圧縮した音声を埋め込む', async () => {
+  const r = await run(['video', '-', '-o', 'v-aac.html'], { stdin: SRC, ttsProvider: fakeProvider(), encodeAudio: async () => ({ mime: 'audio/mp4', data: Buffer.from('m4a') }) });
+  assert.equal(r.code, 0, r.err);
+  assert.match(readFileSync(join(dir, 'v-aac.html'), 'utf8'), /data:audio\/mp4;base64,/);
 });

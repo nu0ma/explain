@@ -13,7 +13,7 @@ import { COMPONENTS } from './components/index.js';
 import { THEMES } from './themes/index.js';
 import { renderVideo } from './video/render.js';
 import { serveWatch } from './watch.js';
-import { pickProvider, TtsError, VOICES } from './video/tts.js';
+import { pickProvider, compressAudio, TtsError, VOICES } from './video/tts.js';
 import { exportMp4, ExportError } from './video/export.js';
 import { explainHome, readConfig, setConfig, resetConfig, CONFIG_KEYS, ConfigError } from './config.js';
 
@@ -99,6 +99,7 @@ Client -> Server: ACK
 - 音声：--voice auto（既定。ELEVENLABS_API_KEY があれば ElevenLabs、なければ OS の読み上げ）| elevenlabs | system | off。
   ElevenLabs の声は環境変数 ELEVENLABS_VOICE_ID で指定できる。
 - 出力先は ~/.explain-cli/videos/。--mp4 で同じ名前の .mp4 も保存する（Chrome と ffmpeg が必要）。
+- ffmpeg があれば、再生ページに埋め込む音声を AAC に圧縮する（なければ WAV のまま）。
 - 動画は再生に JavaScript が要るため、--static は使えない。`;
 
 export async function main(argv, io = {}) {
@@ -147,7 +148,7 @@ export async function main(argv, io = {}) {
         fail('✗ explain video では --static を使えません。動画の再生には JavaScript が必要です');
         return 2;
       }
-      return withSource(arg, io, fail, (src) => cmdVideo(src, opts, { print, fail, env, cwd: io.cwd, provider: io.ttsProvider }));
+      return withSource(arg, io, fail, (src) => cmdVideo(src, opts, { print, fail, env, cwd: io.cwd, provider: io.ttsProvider, encodeAudio: io.encodeAudio }));
     case 'lint': return withSource(arg, io, fail, (src) => cmdLint(src, opts, { print, fail }));
     case 'config': return cmdConfig([arg, ...rest].filter((x) => x !== undefined), { print, fail, env });
     case 'list': return cmdList(print), 0;
@@ -274,7 +275,7 @@ async function cmdWatch(arg, opts, { print, fail, env, cwd, signal }) {
   return 0;
 }
 
-async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected }) {
+async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected, encodeAudio = compressAudio }) {
   const config = readConfig(env);
   if (config.warning) fail(`! ${config.warning}`);
   const voice = opts.voice ?? config.values.voice;
@@ -291,6 +292,7 @@ async function cmdVideo(src, opts, { print, fail, env, cwd, provider: injected }
       defaults: { style: config.values.style, theme: config.values.theme, mode: config.values.mode },
       overrides: { style: opts.style, theme: opts.theme, mode: opts.mode },
       onProgress: (msg) => fail(`  ${msg}`),
+      encodeAudio,
     });
     result.voiceName = provider ? provider.name : 'なし（字幕のみ）';
   } catch (e) {
