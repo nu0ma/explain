@@ -1,9 +1,9 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable, Writable } from 'node:stream';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.ts';
 import { renderVideo, captionHtml, videoMode, VIDEO_UI } from '../src/video/render.ts';
 import type { RenderVideoOptions } from '../src/video/render.ts';
@@ -159,6 +159,46 @@ test('pickProvider: offは字幕だけ。sayはmacOSでsayがあるときだけ�
       continue;
     }
     assert.equal(pickProvider(...req), want, name);
+  }
+});
+
+test('pickProvider: 選んだ声をファイルに残し、次からは声の一覧を取らない。refresh で一覧を 1 回だけ取り直す', () => {
+  const cases = [
+    { name: 'ファイルなし', file: null, want: { id: 'say:Kyoko', lists: 1, kept: 'Kyoko' }, wantRefreshed: { id: 'say:Kyoko', lists: 1, kept: 'Kyoko' } },
+    { name: '残した声', file: '{"voice":"Eddy"}', want: { id: 'say:Eddy', lists: 0, kept: 'Eddy' }, wantRefreshed: { id: 'say:Kyoko', lists: 1, kept: 'Kyoko' } },
+    { name: 'OS の既定の声', file: '{"voice":null}', want: { id: 'say:default', lists: 0, kept: null }, wantRefreshed: { id: 'say:Kyoko', lists: 1, kept: 'Kyoko' } },
+    { name: '壊れたファイル', file: '{"voice":', want: { id: 'say:Kyoko', lists: 1, kept: 'Kyoko' }, wantRefreshed: { id: 'say:Kyoko', lists: 1, kept: 'Kyoko' } },
+  ];
+  for (const { name, file, want, wantRefreshed } of cases) {
+    const voiceFile = join(mkdtempSync(join(dir, 'voice-')), 'tts', 'voice.json');
+    if (file !== null) {
+      mkdirSync(dirname(voiceFile), { recursive: true });
+      writeFileSync(voiceFile, file);
+    }
+    let lists = 0;
+    const p = pickProvider('say', { platform: 'darwin', which: () => true, voiceFile, listVoice: () => { lists++; return 'Kyoko'; } });
+    assert.ok(p);
+    const state = () => ({ id: p.id, lists, kept: JSON.parse(readFileSync(voiceFile, 'utf8')).voice });
+    assert.deepEqual(state(), want, name);
+    p.refresh?.();
+    p.refresh?.();
+    assert.deepEqual(state(), wantRefreshed, `${name}: refresh`);
+  }
+});
+
+test('synthAll: 合成する文があるときだけ先に refresh を呼び、そのあとの id でキャッシュを引く', async () => {
+  const cases = [
+    { name: 'すべてキャッシュにある', texts: ['一文'], wantRefresh: 0, wantCalls: [] },
+    { name: '新しい文がある', texts: ['一文', '新しい文'], wantRefresh: 1, wantCalls: ['一文', '新しい文'] },
+  ];
+  for (const { name, texts, wantRefresh, wantCalls } of cases) {
+    const cacheDir = mkdtempSync(join(dir, 'refresh-'));
+    await synthAll(['一文'], fakeProvider(), { cacheDir });
+    let refreshed = 0;
+    const p = { ...fakeProvider(), refresh() { refreshed++; this.id = 'fake2'; } };
+    await synthAll(texts, p, { cacheDir });
+    assert.equal(refreshed, wantRefresh, name);
+    assert.deepEqual(p.calls, wantCalls, name);
   }
 });
 
