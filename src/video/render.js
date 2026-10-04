@@ -103,11 +103,17 @@ function sheetFrame() {
   return `<div class="amv-sheet" aria-hidden="true">${ruler('top', nums)}${ruler('bottom', nums)}${ruler('left', letters)}${ruler('right', letters)}</div>`;
 }
 
+// 3b1b はダーク専用。auto は再生する OS の配色に従う（MP4 の書き出しではライトに固定する）。
+export function videoMode(meta) {
+  if (meta.theme === '3b1b') return 'dark';
+  return ['light', 'dark'].includes(meta.mode) ? meta.mode : 'auto';
+}
+
 function shell({ meta, scenesHtml, data, wav, source }) {
   const ui = VIDEO_UI;
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   return `<!doctype html>
-<html lang="ja" data-theme="${esc(meta.theme)}" data-mode="${meta.theme === '3b1b' || meta.mode === 'dark' ? 'dark' : 'light'}" data-video>
+<html lang="ja" data-theme="${esc(meta.theme)}" data-mode="${videoMode(meta)}" data-video>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

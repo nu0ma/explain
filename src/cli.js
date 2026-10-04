@@ -25,7 +25,7 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
                            [--template sheet|doc] [--style off|80|strict] [--mode auto|light|dark]
                                                      解説ページ（HTML）を作る
   explain video  <file|->  [-o 出力先] [--voice auto|elevenlabs|system|off] [--mp4] [--no-open]
-                           [--theme blueprint|shadcn|3b1b] [--mode light|dark]
+                           [--theme blueprint|shadcn|3b1b] [--mode auto|light|dark]
                                                      3b1b 風の解説動画の再生ページを作る（--mp4 で動画ファイルも保存）
   explain lint   <file|->  [--style off|80|strict]   STE 検査だけする
   explain config [set <キー> <値> | get <キー> | reset [キー]]
@@ -74,7 +74,7 @@ const VIDEO_FORMAT = `動画の原稿の書式（explain video）
 title: TCP の 3 ウェイハンドシェイク
 subtitle: なぜ 3 回なのか          # 省略可。タイトル画面の副題
 theme: blueprint                 # blueprint 図面風（既定。explain config の theme に従う）| shadcn カード | 3b1b ダーク
-mode: light                      # light | dark（blueprint + dark は濃紺の図面）
+mode: auto                       # auto（OS の設定に従う。MP4 はライト）| light | dark（blueprint + dark は濃紺の図面）
 ---
 > タイトル画面のナレーション（省略可。書かなければタイトル画面を 2.4 秒表示する）
 

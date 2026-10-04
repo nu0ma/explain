@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseVideo, estimateSeconds, buildTimeline, allBeats, TIMING } from '../src/video/script.js';
-import { renderVideo, captionHtml, VIDEO_UI } from '../src/video/render.js';
+import { renderVideo, captionHtml, videoMode, VIDEO_UI } from '../src/video/render.js';
 import { readWav, wav, mixTrack, trimSilence, synthAll, pickProvider, pickMacVoice, TtsError, SAMPLE_RATE } from '../src/video/tts.js';
 import { findChrome } from '../src/video/export.js';
 import { renderDoc } from '../src/render.js';
@@ -191,9 +191,9 @@ test('renderVideo: static: true はエラー（動画には JavaScript が必要
   await assert.rejects(renderVideo(`---\nstatic: true\n---\n## 場面\n> 文。\n`), (e) => e instanceof ParseError && /static: true は使えません/.test(e.message));
 });
 
-test('動画のテーマ：既定は blueprint のライト。原稿で 3b1b を選べ、コマンドラインの引数が優先する', async () => {
+test('動画のテーマ：既定は blueprint で配色は OS に従う。原稿で 3b1b を選べ、コマンドラインの引数が優先する', async () => {
   const def = await renderVideo(SRC);
-  assert.match(def.html, /data-theme="blueprint" data-mode="light" data-video/);
+  assert.match(def.html, /data-theme="blueprint" data-mode="auto" data-video/);
   assert.match(def.html, /class="amv-sheet"/, '図面の外枠');
   assert.match(def.html, /SHEET 01 \/ 02/);
   const dark = await renderVideo(`---\ntheme: 3b1b\n---\n${SRC.split('---\n').slice(2).join('---\n')}`);
@@ -201,6 +201,7 @@ test('動画のテーマ：既定は blueprint のライト。原稿で 3b1b を
   const cli = await renderVideo(SRC, { overrides: { theme: 'shadcn', mode: 'dark' } });
   assert.match(cli.html, /data-theme="shadcn" data-mode="dark"/);
   await assert.rejects(renderVideo(SRC, { overrides: { theme: 'neon' } }), /theme の値 "neon" は使えません/);
+  assert.match(def.html, /@media \(prefers-color-scheme: dark\) \{\s*html\[data-video\]\[data-theme="blueprint"\]\[data-mode="auto"\]/, 'auto の図面の背景も OS に従う');
   assert.throws(() => renderDoc('---\ntheme: 3b1b\n---\n## A\n文字\n'), ParseError, 'ページでは 3b1b を使えない');
 });
 
@@ -285,4 +286,14 @@ test('e2e: --mp4 で 1080p30・音声つきの動画を書き出す', { skip: !E
   const probe = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height', '-of', 'csv=p=0', join(dir, 'e2e.mp4')], { encoding: 'utf8' });
   assert.match(probe, /video,1920,1080/);
   assert.match(probe, /audio/);
+});
+
+test('videoMode: light と dark はそのまま、それ以外は auto。3b1b は常に dark', () => {
+  const cases = [
+    { req: { theme: 'blueprint', mode: 'light' }, want: 'light' },
+    { req: { theme: 'shadcn', mode: 'dark' }, want: 'dark' },
+    { req: { theme: 'blueprint', mode: 'auto' }, want: 'auto' },
+    { req: { theme: '3b1b', mode: 'light' }, want: 'dark' },
+  ];
+  for (const { req, want } of cases) assert.equal(videoMode(req), want, JSON.stringify(req));
 });

@@ -30,6 +30,12 @@ html[data-video][data-theme="blueprint"][data-mode="dark"] {
   --v-stage: linear-gradient(rgba(201, 214, 232, 0.07) 1px, transparent 1px) 0 0 / 40px 40px,
              linear-gradient(90deg, rgba(201, 214, 232, 0.07) 1px, transparent 1px) 0 0 / 40px 40px, var(--bg);
 }
+@media (prefers-color-scheme: dark) {
+  html[data-video][data-theme="blueprint"][data-mode="auto"] {
+    --v-stage: linear-gradient(rgba(201, 214, 232, 0.07) 1px, transparent 1px) 0 0 / 40px 40px,
+               linear-gradient(90deg, rgba(201, 214, 232, 0.07) 1px, transparent 1px) 0 0 / 40px 40px, var(--bg);
+  }
+}
 
 html[data-video], html[data-video] body { background: #000; height: 100%; overflow: hidden; }
 html[data-video] body { font-size: 22px; }

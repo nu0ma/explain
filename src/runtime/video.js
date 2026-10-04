@@ -349,7 +349,12 @@
   window.__amv = {
     duration: D.duration,
     fps: D.fps,
-    exportMode() { root.setAttribute('data-export', ''); stage.style.transform = ''; },
+    exportMode() {
+      root.setAttribute('data-export', '');
+      // 書き出す環境の配色で結果が変わらないよう、auto はライトに固定する。
+      if (root.getAttribute('data-mode') === 'auto') root.setAttribute('data-mode', 'light');
+      stage.style.transform = '';
+    },
   };
   fitStage();
   // 表紙：完全に現れた後のタイトル画面を見せる。再生は 0 秒から始める。
