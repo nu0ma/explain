@@ -135,9 +135,28 @@ test('render --static: 原稿に JavaScript があればエラーにする', () 
     '## A\n```html\n<script>alert(1)</script>\n```',
     '## A\n```html\n<img src="x" onerror="alert(1)">\n```',
     '## A\n[リンク](javascript:alert(1))',
+    '## A\n```html\n<img/src=x/onerror=alert(1)>\n```',
+    '## A\n```html\n<a href="jav&#x61;script:alert(1)">x</a>\n```',
+    '## A\n```html\n<a href="java&#9;script:alert(1)">x</a>\n```',
+    '## A\n```svg\n<svg><a href="javascript&colon;alert(1)"><text>x</text></a></svg>\n```',
+    '## A\n```html\n<iframe src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="></iframe>\n```',
+    '## A\n```html\n<object data="x.svg"></object>\n```',
+    '## A\n```html\n<embed src="x.svg">\n```',
+    '## A\n```html\n<form action="https://example.com"><button>x</button></form>\n```',
+    '## A\n```html\n<base href="https://example.com/">\n```',
+    '## A\n```html\n<meta http-equiv="refresh" content="0;url=https://example.com/">\n```',
   ];
   for (const src of cases) assert.throws(() => renderDoc(src, { static: true }), ParseError, src);
   assert.doesNotThrow(() => renderDoc(cases[0]), 'static でなければそのまま埋め込む');
+  assert.doesNotThrow(() => renderDoc('## A\n```html\n<b>&#99999999;&#xFFFFFFF;</b>\n```', { static: true }), '範囲外の文字参照で落ちない');
+});
+
+test('render --static: JavaScript を止める CSP を head の先頭に入れる', () => {
+  const { html } = renderDoc('## A\n```svg\n<svg><rect width="10" height="10"/></svg>\n```', { static: true });
+  const csp = html.indexOf('<meta http-equiv="Content-Security-Policy" content="script-src \'none\'; object-src \'none\'; frame-src \'none\'; base-uri \'none\'; form-action \'none\'">');
+  assert.ok(csp > 0 && csp < html.indexOf('<title>'), 'CSP は title より前');
+  assert.match(html, /<svg><rect width="10" height="10"\/><\/svg>/, 'script のない SVG はそのまま埋め込む');
+  assert.doesNotMatch(renderDoc('## A\nx').html, /Content-Security-Policy/, 'static でなければ CSP を入れない');
 });
 
 test('render: frontmatter の static は true / false だけ', () => {

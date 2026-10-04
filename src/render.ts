@@ -70,7 +70,29 @@ export const UI: Readonly<UiLabels> = Object.freeze({
 });
 
 // Detects JavaScript that slipped into static output (from html blocks or raw HTML in Markdown).
-const SCRIPT_LIKE = /<script\b|<[^>]+\son[a-z]+\s*=|javascript:/i;
+// This only gives the author a clear error; the CSP in the static shell is what actually blocks execution.
+const ACTIVE_TAG = /<(?:script|iframe|frame|object|embed|applet|form|base)\b|<meta\b[^>]*\bhttp-equiv/i;
+// Attribute names may follow a slash or a quote as well as whitespace (e.g. <img/src=x/onerror=...>).
+const EVENT_ATTR = /<[^>]*[\s/"']on[a-z]+\s*=/i;
+const SCRIPT_URL = /(?:java|vb)script:|data:text\/html/i;
+
+// Browsers decode character references in attribute values and drop tabs and newlines inside URLs.
+const codePoint = (n: number): string => (n <= 0x10ffff ? String.fromCodePoint(n) : '');
+
+function decodeUrlChars(html: string): string {
+  return html
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => codePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec: string) => codePoint(Number(dec)))
+    .replace(/&colon;/gi, ':')
+    .replace(/&(?:tab|newline);/gi, '')
+    .replace(/[\t\n\r]/g, '');
+}
+
+function hasScript(html: string): boolean {
+  return ACTIVE_TAG.test(html) || EVENT_ATTR.test(html) || SCRIPT_URL.test(decodeUrlChars(html));
+}
+
+const STATIC_CSP = "script-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 
 // overrides.static (--static) or frontmatter static: true produces HTML without <script>.
 export function renderDoc(source: string, overrides: RenderOverrides = {}, defaults: ParseDocOptions['defaults'] = {}): RenderResult {
@@ -90,10 +112,10 @@ export function renderDoc(source: string, overrides: RenderOverrides = {}, defau
   const introHtml = renderBlocks(doc.intro, ctx);
   const panels = doc.panels.map((p) => ({ ...p, html: renderBlocks(p.blocks, ctx) }));
   const body = TEMPLATES[doc.meta.template]({ meta: doc.meta, introHtml, panels });
-  const html = shell({ meta: doc.meta, body, source, isStatic });
-  if (isStatic && SCRIPT_LIKE.test(html)) {
+  if (isStatic && hasScript(body)) {
     throw new ParseError('静的出力（--static / static: true）には JavaScript を入れられません。html ブロックなどにある <script>、on〜 属性、javascript: を削除してください', 0);
   }
+  const html = shell({ meta: doc.meta, body, source, isStatic });
   return { html, warnings, stats, meta: doc.meta, static: isStatic };
 }
 
@@ -136,7 +158,7 @@ ${RUNTIME_JS}</script>
 <html lang="ja" data-theme="${esc(meta.theme)}" data-mode="${esc(meta.mode)}"${isStatic ? ' data-static' : ''}>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+${isStatic ? `<meta http-equiv="Content-Security-Policy" content="${STATIC_CSP}">\n` : ''}<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="explain ${VERSION}">
 <title>${esc(meta.title || '無題')}</title>
 <style>
