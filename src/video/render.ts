@@ -2,6 +2,7 @@
 // The player's render(t) is deterministic: the same time always draws the same frame. MP4 export calls it once per frame.
 import { renderBlocks, LintError } from '../render.ts';
 import { timestamp } from '../time.ts';
+import { networkMeta, type NetworkOptions } from '../network.ts';
 import { pageCss } from '../themes/index.ts';
 import { lintDoc, blockingWarnings } from '../lint/ste.ts';
 import { esc } from '../svg/text.ts';
@@ -16,7 +17,7 @@ type Meta = Video['meta'];
 type RenderContext = Parameters<typeof renderBlocks>[1];
 type Warning = ReturnType<typeof lintDoc>[number];
 
-export interface RenderVideoOptions {
+export interface RenderVideoOptions extends NetworkOptions {
   provider?: TtsProvider | null;
   cacheDir?: string;
   defaults?: NonNullable<Parameters<typeof parseVideo>[1]>['defaults'];
@@ -55,7 +56,7 @@ export const VIDEO_UI = Object.freeze({ play: '再生', pause: '一時停止', c
 // encodeAudio(wav) converts the embedded audio to { mime, data } (returning null keeps the WAV). When omitted, the WAV is embedded.
 export async function renderVideo(
   source: string,
-  { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null }: RenderVideoOptions = {},
+  { provider = null, cacheDir, defaults = {}, overrides = {}, onProgress, encodeAudio = null, allowNetwork = false }: RenderVideoOptions = {},
 ): Promise<RenderedVideo> {
   const { video, warnings, screens, stats } = prepareVideo(source, { defaults, overrides });
   const { meta } = video;
@@ -92,7 +93,7 @@ export async function renderVideo(
     ...video.scenes.map((s, i) => scene(s, i, total, screens.scenes[i])),
   ].join('\n');
 
-  const html = shell({ meta, scenesHtml, data, audio, source });
+  const html = shell({ meta, scenesHtml, data, audio, source, allowNetwork });
   return { html, wav, warnings, stats, meta, duration: timeline.duration, beats: beats.length };
 }
 
@@ -151,14 +152,14 @@ export function videoMode(meta: { theme?: unknown; mode?: unknown }): 'light' | 
   return meta.mode === 'light' || meta.mode === 'dark' ? meta.mode : 'auto';
 }
 
-function shell({ meta, scenesHtml, data, audio, source }: { meta: Meta; scenesHtml: string; data: PlayerData; audio: EncodedAudio | null; source: string }): string {
+function shell({ meta, scenesHtml, data, audio, source, allowNetwork }: { meta: Meta; scenesHtml: string; data: PlayerData; audio: EncodedAudio | null; source: string } & NetworkOptions): string {
   const ui = VIDEO_UI;
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   return `<!doctype html>
 <html lang="ja" data-theme="${esc(meta.theme)}" data-mode="${videoMode(meta)}" data-video>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+${networkMeta({ allowNetwork })}<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="explain ${VERSION}">
 <title>${esc(meta.title || '無題')}</title>
 <style>

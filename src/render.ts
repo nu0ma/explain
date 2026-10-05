@@ -11,6 +11,7 @@ import type { LintWarning } from './lint/ste.ts';
 import { esc } from './svg/text.ts';
 import { VERSION, RUNTIME_JS } from './assets.ts';
 import { timestamp } from './time.ts';
+import { networkMeta, type NetworkOptions } from './network.ts';
 
 export type RenderErrorInfo = { line?: number; component?: string; example?: string };
 
@@ -92,10 +93,8 @@ function hasScript(html: string): boolean {
   return ACTIVE_TAG.test(html) || EVENT_ATTR.test(html) || SCRIPT_URL.test(decodeUrlChars(html));
 }
 
-const STATIC_CSP = "script-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
-
 // overrides.static (--static) or frontmatter static: true produces HTML without <script>.
-export function renderDoc(source: string, overrides: RenderOverrides = {}, defaults: ParseDocOptions['defaults'] = {}): RenderResult {
+export function renderDoc(source: string, overrides: RenderOverrides = {}, defaults: ParseDocOptions['defaults'] = {}, options: NetworkOptions = {}): RenderResult {
   const doc = parseDoc(source, { defaults });
   const { static: staticFlag, ...rest } = overrides;
   applyOverrides(doc.meta, rest);
@@ -115,7 +114,7 @@ export function renderDoc(source: string, overrides: RenderOverrides = {}, defau
   if (isStatic && hasScript(body)) {
     throw new ParseError('静的出力（--static / static: true）には JavaScript を入れられません。html ブロックなどにある <script> や <iframe> などのタグ、on〜 属性、javascript: を削除してください', 0);
   }
-  const html = shell({ meta: doc.meta, body, source, isStatic });
+  const html = shell({ meta: doc.meta, body, source, isStatic, ...options });
   return { html, warnings, stats, meta: doc.meta, static: isStatic };
 }
 
@@ -143,7 +142,7 @@ function renderFence(block: FenceBlock, ctx: RenderBlocksContext): string {
   }
 }
 
-function shell({ meta, body, source, isStatic }: { meta: Meta; body: string; source: string; isStatic: boolean }): string {
+function shell({ meta, body, source, isStatic, allowNetwork }: { meta: Meta; body: string; source: string; isStatic: boolean } & NetworkOptions): string {
   const toolbar = isStatic ? '' : `<div class="am-toolbar">
 <button class="am-btn" type="button" data-am="theme" data-labels="${esc(JSON.stringify(UI.theme))}">${esc(UI.theme[meta.theme])}</button>
 <button class="am-btn" type="button" data-am="mode" data-labels="${esc(JSON.stringify(UI.mode))}">${esc(UI.mode[meta.mode])}</button>
@@ -158,7 +157,7 @@ ${RUNTIME_JS}</script>
 <html lang="ja" data-theme="${esc(meta.theme)}" data-mode="${esc(meta.mode)}"${isStatic ? ' data-static' : ''}>
 <head>
 <meta charset="utf-8">
-${isStatic ? `<meta http-equiv="Content-Security-Policy" content="${STATIC_CSP}">\n` : ''}<meta name="viewport" content="width=device-width, initial-scale=1">
+${networkMeta({ isStatic, allowNetwork })}<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="explain ${VERSION}">
 <title>${esc(meta.title || '無題')}</title>
 <style>

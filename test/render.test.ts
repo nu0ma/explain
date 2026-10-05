@@ -151,12 +151,13 @@ test('render --static: 原稿に JavaScript があればエラーにする', () 
   assert.doesNotThrow(() => renderDoc('## A\n```html\n<b>&#99999999;&#xFFFFFFF;</b>\n```', { static: true }), '範囲外の文字参照で落ちない');
 });
 
-test('render --static: JavaScript を止める CSP を head の先頭に入れる', () => {
-  const { html } = renderDoc('## A\n```svg\n<svg><rect width="10" height="10"/></svg>\n```', { static: true });
-  const csp = html.indexOf('<meta http-equiv="Content-Security-Policy" content="script-src \'none\'; object-src \'none\'; frame-src \'none\'; base-uri \'none\'; form-action \'none\'">');
-  assert.ok(csp > 0 && csp < html.indexOf('<title>'), 'CSP は title より前');
-  assert.match(html, /<svg><rect width="10" height="10"\/><\/svg>/, 'script のない SVG はそのまま埋め込む');
-  assert.doesNotMatch(renderDoc('## A\nx').html, /Content-Security-Policy/, 'static でなければ CSP を入れない');
+test('render: CSP precedes author content and static output still blocks scripts', () => {
+  const html = renderDoc('## A\nx', { static: true }).html;
+  const csp = html.indexOf('<meta http-equiv="Content-Security-Policy"');
+  assert.ok(csp > 0 && csp < html.indexOf('<title>'));
+  assert.match(html, /script-src 'none'/);
+  assert.match(html, /connect-src 'none'/);
+  assert.match(renderDoc('## A\nx').html, /script-src 'unsafe-inline'/);
 });
 
 test('render: frontmatter の static は true / false だけ', () => {

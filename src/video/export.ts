@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { hasCommand } from './tts.ts';
+import type { NetworkOptions } from '../network.ts';
 
 export class ExportError extends Error {
   constructor(message: string) {
@@ -20,6 +21,8 @@ export type CdpParams = Record<string, unknown>;
 export interface CdpClient {
   send(method: string, params?: CdpParams, sessionId?: string): Promise<unknown>;
   once(method: string, sessionId?: string): Promise<unknown>;
+  // Persistent events from every session. Optional for existing injected test clients.
+  on?: (method: string, listener: (params: unknown, sessionId?: string) => void) => () => void;
   close(): void;
 }
 
@@ -40,11 +43,11 @@ export interface EncoderProcess {
 export interface ExportDeps {
   has?: (cmd: string) => boolean;
   find?: (env: NodeJS.ProcessEnv) => string | null;
-  launch?: (chromePath: string, profileDir: string) => Promise<Browser>;
+  launch?: (chromePath: string, profileDir: string, options?: NetworkOptions) => Promise<Browser>;
   encoder?: (args: string[]) => EncoderProcess;
 }
 
-export interface ExportOptions {
+export interface ExportOptions extends NetworkOptions {
   wav?: Buffer | null;
   env?: NodeJS.ProcessEnv;
   onProgress?: (done: number, total: number) => void;
@@ -87,7 +90,7 @@ interface CdpCommands {
     result: { data: string };
   };
   'Runtime.evaluate': {
-    params: { expression: string; awaitPromise: boolean; returnByValue: boolean };
+    params: { expression: string; awaitPromise: boolean; returnByValue: boolean; userGesture?: boolean };
     result: { result: { value?: unknown }; exceptionDetails?: { text: string; exception?: { description?: string } } };
   };
 }
@@ -107,6 +110,7 @@ interface CdpMessage {
 }
 
 interface Pending {
+  what: string;
   ok: (value: unknown) => void;
   fail: (err: Error) => void;
 }
@@ -141,7 +145,7 @@ export function findChrome(env: NodeJS.ProcessEnv = process.env, platform: NodeJ
 export async function exportMp4(
   htmlFile: string,
   mp4File: string,
-  { wav, env = process.env, onProgress = () => {}, concurrency = Math.min(8, availableParallelism()), browsers = Math.ceil(concurrency / 2), deps = {} }: ExportOptions = {},
+  { wav, env = process.env, onProgress = () => {}, concurrency = Math.min(8, availableParallelism()), browsers = Math.ceil(concurrency / 2), deps = {}, allowNetwork = false }: ExportOptions = {},
 ): Promise<{ frames: number; duration: number }> {
   const { has = hasCommand, find = findChrome, launch = launchChrome, encoder = spawnFfmpeg } = deps;
   if (!has('ffmpeg')) throw new ExportError('MP4 の書き出しには ffmpeg が必要です。macOS は brew install ffmpeg、Linux はパッケージマネージャーで入れてください');
@@ -155,9 +159,9 @@ export async function exportMp4(
   try {
     const tabs = Math.max(1, concurrency);
     await Promise.all(Array.from({ length: Math.min(tabs, Math.max(1, browsers)) }, async (_, i) => {
-      launched.push(await launch(chromePath, join(tmp, `profile-${i}`)));
+      launched.push(await launch(chromePath, join(tmp, `profile-${i}`), { allowNetwork }));
     }));
-    const pages = await Promise.all(Array.from({ length: tabs }, (_, i) => openPage(launched[i % launched.length].cdp, htmlFile)));
+    const pages = await Promise.all(Array.from({ length: tabs }, (_, i) => openPage(launched[i % launched.length].cdp, htmlFile, { allowNetwork })));
     const infos = await Promise.all(pages.map((p) => p.evaluate('document.fonts.ready.then(() => { window.__amv.exportMode(); return { duration: window.__amv.duration, fps: window.__amv.fps, keyframes: window.__amv.keyframes() }; })')));
     // The expression above returns this shape from the player page.
     const info = infos[0] as PlayerInfo;
@@ -245,7 +249,7 @@ export async function exportMp4(
 }
 
 // Opens a page in a new tab and waits for it to load. send and evaluate target that tab.
-export async function openPage(cdp: CdpClient, htmlFile: string, { width = 1920, height = 1080 }: { width?: number; height?: number } = {}): Promise<Page> {
+export async function openPage(cdp: CdpClient, htmlFile: string, { width = 1920, height = 1080, allowNetwork = false }: { width?: number; height?: number } & NetworkOptions = {}): Promise<Page> {
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string };
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string };
   // The result shapes come from the CDP specification for each command.
@@ -253,6 +257,8 @@ export async function openPage(cdp: CdpClient, htmlFile: string, { width = 1920,
     cdp.send(method, params, sessionId) as Promise<CdpCommands[M]['result']>;
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await send('Page.enable');
+  // Set the export boundary before parsing any author content, independent of its CSP.
+  if (!allowNetwork) await blockPageNetwork(cdp, sessionId);
   const loaded = cdp.once('Page.loadEventFired', sessionId);
   loaded.catch(() => {}); // Do not leave an unhandled rejection when something fails before the load.
   await send('Page.navigate', { url: pathToFileURL(htmlFile).href });
@@ -269,14 +275,77 @@ function spawnFfmpeg(args: string[]): EncoderProcess {
   return spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
 }
 
-// Launches headless Chrome and talks CDP over a pipe (fds 3 and 4), so no DevTools port is opened for other local processes.
-// stop() terminates Chrome and waits up to 3 seconds for it to exit, then kills it outright.
-export async function launchChrome(chromePath: string, profileDir: string): Promise<Browser> {
-  const chrome = spawn(chromePath, [
+async function blockPageNetwork(cdp: CdpClient, sessionId: string): Promise<void> {
+  await cdp.send('Network.enable', {}, sessionId);
+  await cdp.send('Network.setBlockedURLs', { urls: ['http://*', 'https://*', 'ws://*', 'wss://*', 'ftp://*'] }, sessionId);
+  await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 }, sessionId);
+}
+
+const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true };
+
+// Install at the browser target before opening author content. Pausing new targets also
+// holds window.open's initial navigation until its session has the network restrictions.
+// This complements the document CSP; it is not an OS-level network or hostile-code sandbox.
+export async function guardBrowserNetwork(cdp: CdpClient, onFailure: (error: Error) => void): Promise<() => void> {
+  if (!cdp.on) throw new ExportError('The browser cannot enforce network restrictions: CDP events are unavailable');
+  let disposed = false;
+  const seen = new Set<string>();
+  const off = cdp.on('Target.attachedToTarget', (params) => {
+    if (disposed) return;
+    const { sessionId, targetInfo } = params as { sessionId: string; targetInfo: { type: string; url?: string } };
+    if (seen.has(sessionId)) return;
+    seen.add(sessionId);
+    const configure = async () => {
+      // Generated documents prohibit workers. Raw input must not use a worker or
+      // worklet to escape the page controls, and Chromium does not support every
+      // page-level Network command on these targets. Reject before resuming them.
+      const type = targetInfo.type;
+      if (type === 'worker' || type.endsWith('_worker') || type === 'worklet' || type.endsWith('_worklet')) {
+        // Show only the target kind and scheme, never source text, URLs, or local paths.
+        let scheme = 'unknown';
+        try { scheme = new URL(targetInfo.url ?? '').protocol; } catch { /* The target may not have a URL yet. */ }
+        throw new ExportError(`外部通信を止めた書き出しでは Worker / Worklet を使えません。信頼できる原稿で必要なときだけ --allow-network を付けてください（type=${type}, scheme=${scheme}）`);
+      }
+      await blockPageNetwork(cdp, sessionId);
+      // Auto-attachment is not recursive; keep descendants paused until protected too.
+      await cdp.send('Target.setAutoAttach', AUTO_ATTACH, sessionId);
+      if (!disposed) await cdp.send('Runtime.runIfWaitingForDebugger', {}, sessionId);
+    };
+    void configure().catch((error: unknown) => {
+      if (disposed) return;
+      disposed = true;
+      off();
+      // Never resume a target after a failed security command. The launcher closes the
+      // connection and stops Chrome, making in-flight exports fail rather than hang.
+      onFailure(error instanceof Error ? error : new ExportError(String(error)));
+    });
+  });
+  const dispose = () => { disposed = true; off(); };
+  try {
+    await cdp.send('Target.setAutoAttach', AUTO_ATTACH);
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+  return dispose;
+}
+
+export function chromeArgs(profileDir: string): string[] {
+  return [
     '--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`,
     '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
+    '--disable-background-networking',
+    // Match Chrome automation defaults: the isolated export profile needs no
+    // extensions, including Chrome's own component background pages/workers.
+    '--disable-extensions', '--disable-component-extensions-with-background-pages',
     '--force-device-scale-factor=1', '--window-size=1920,1080', 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+  ];
+}
+
+// Launches headless Chrome and talks CDP over a pipe (fds 3 and 4), so no DevTools port is opened for other local processes.
+// stop() terminates Chrome and waits up to 3 seconds for it to exit, then kills it outright.
+export async function launchChrome(chromePath: string, profileDir: string, { allowNetwork = false }: NetworkOptions = {}): Promise<Browser> {
+  const chrome = spawn(chromePath, chromeArgs(profileDir), { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
   const stop = () => new Promise<void>((r) => {
     if (chrome.exitCode !== null || chrome.signalCode !== null) return r();
     const timer = setTimeout(() => { chrome.kill('SIGKILL'); r(); }, 3000);
@@ -288,15 +357,23 @@ export async function launchChrome(chromePath: string, profileDir: string): Prom
   chrome.once('error', (e) => socket.fail(new ExportError(`Chrome を起動できません：${e.message}`)));
   chrome.once('exit', () => socket.fail(new ExportError('Chrome が終了しました')));
   let cdp: CdpClient;
+  let unguard: (() => void) | undefined;
   try {
     cdp = await connect(socket);
     // The first command also checks that Chrome started.
     await cdp.send('Target.getTargets');
+    if (!allowNetwork) {
+      unguard = await guardBrowserNetwork(cdp, (error) => {
+        socket.fail(error);
+        void stop();
+      });
+    }
   } catch (e) {
+    unguard?.();
     await stop();
     throw e;
   }
-  return { cdp, stop: async () => { cdp.close(); await stop(); } };
+  return { cdp, stop: async () => { unguard?.(); cdp.close(); await stop(); } };
 }
 
 // An 'error' event that carries the cause. Node 22 has no global ErrorEvent.
@@ -356,6 +433,7 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
   return new Promise((resolve, reject) => {
     const pending = new Map<number, Pending>();
     const waiters = new Map<string, Pending>();
+    const listeners = new Map<string, Set<(params: unknown, sessionId?: string) => void>>();
     let id = 0;
     let closed: Error | null = null;
     const failAll = (err: Error) => {
@@ -365,6 +443,7 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
       for (const { fail } of waiters.values()) fail(err);
       pending.clear();
       waiters.clear();
+      listeners.clear();
       reject(err);
     };
     // Registers a request or event wait that fails after timeoutMs.
@@ -374,6 +453,7 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
         fail(new ExportError(`Chrome が ${timeoutMs / 1000} 秒以内に応答しません（${what}）`));
       }, timeoutMs);
       map.set(key, {
+        what,
         ok: (v) => { clearTimeout(timer); ok(v); },
         fail: (e) => { clearTimeout(timer); fail(e); },
       });
@@ -387,12 +467,13 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
       const request = msg.id ? pending.get(msg.id) : undefined;
       if (msg.id && request) {
         pending.delete(msg.id);
-        if (msg.error) request.fail(new ExportError(`CDP ${msg.error.message}`));
+        if (msg.error) request.fail(new ExportError(`CDP ${request.what}: ${msg.error.message}`));
         else request.ok(msg.result);
-      } else if (msg.method && waiters.has(`${msg.sessionId ?? ''}:${msg.method}`)) {
+      } else if (msg.method) {
         const key = `${msg.sessionId ?? ''}:${msg.method}`;
         waiters.get(key)?.ok(msg.params);
         waiters.delete(key);
+        for (const listener of listeners.get(msg.method) ?? []) listener(msg.params, msg.sessionId);
       }
     });
     socket.addEventListener('open', () => resolve({
@@ -405,6 +486,13 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
       once(method, sessionId) {
         if (closed) return Promise.reject(closed);
         return track(waiters, `${sessionId ?? ''}:${method}`, method);
+      },
+      on(method, listener) {
+        if (closed) throw closed;
+        let handlers = listeners.get(method);
+        if (!handlers) listeners.set(method, handlers = new Set());
+        handlers.add(listener);
+        return () => { handlers.delete(listener); };
       },
       close: () => socket.close(),
     }));

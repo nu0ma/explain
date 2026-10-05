@@ -266,6 +266,8 @@ test('cli render --watch: 配信し、保存すると作り直して再読み込
     const url = await until(() => out.text.match(/✓ (http:\/\/127\.0\.0\.1:\d+\/)/)?.[1], 'URL');
     const first = await (await fetch(url)).text();
     assert.match(first, /<h1>CLI テスト<\/h1>/);
+    assert.ok(first.includes(`connect-src ${url}__explain/events;`));
+    assert.match(readFileSync(outFile, 'utf8'), /connect-src 'none'/);
     assert.match(first, /new EventSource\('\/__explain\/events'\)/);
     assert.doesNotMatch(readFileSync(outFile, 'utf8'), /EventSource/, '-o のファイルには再読み込みのスクリプトを入れない');
     const hosts = [
@@ -352,4 +354,25 @@ test('cli: 原稿にある端末の制御文字は、メッセージに出す前
   assert.equal(r.code, 1);
   assert.match(r.err, /x\]0;title31m \| 0/);
   assert.equal([...r.err].some(isControl), false);
+});
+
+
+test('cli: --allow-network is explicit and reaches PNG rendering', async () => {
+  for (const allowNetwork of [false, true]) {
+    const out = join(dir, `network-${allowNetwork}.html`);
+    let seen: boolean | undefined;
+    const r = await main(['render', '-', '-o', out, '--png', ...(allowNetwork ? ['--allow-network'] : [])], {
+      stdin: Readable.from(['## A\ntext']),
+      stdout: sink().stream, stderr: sink().stream,
+      env: { EXPLAIN_NO_OPEN: '1', EXPLAIN_HOME: dir },
+      inspect: async (_html, _png, options) => { seen = options?.allowNetwork; return { issues: [], truncated: 0 }; },
+    });
+    assert.equal(r, 0);
+    assert.equal(Boolean(seen), allowNetwork);
+    assert.equal(readFileSync(out, 'utf8').includes("connect-src 'none'"), !allowNetwork);
+    const video = join(dir, `network-video-${allowNetwork}.html`);
+    const result = await run(['video', '-', '-o', video, '--voice', 'off', ...(allowNetwork ? ['--allow-network'] : [])], { stdin: '## A\ntext\n> hello' });
+    assert.equal(result.code, 0, result.err);
+    assert.equal(readFileSync(video, 'utf8').includes("connect-src 'none'"), !allowNetwork);
+  }
 });

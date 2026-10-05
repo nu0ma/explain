@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findChrome, launchChrome, openPage, ExportError } from './video/export.ts';
+import type { NetworkOptions } from './network.ts';
 import type { Browser } from './video/export.ts';
 
 export type LayoutIssue = {
@@ -15,10 +16,10 @@ export type LayoutIssue = {
 
 export interface SnapshotDeps {
   find?: (env: NodeJS.ProcessEnv) => string | null;
-  launch?: (chromePath: string, profileDir: string) => Promise<Browser>;
+  launch?: (chromePath: string, profileDir: string, options?: NetworkOptions) => Promise<Browser>;
 }
 
-export interface SnapshotOptions {
+export interface SnapshotOptions extends NetworkOptions {
   env?: NodeJS.ProcessEnv;
   width?: number;
   deps?: SnapshotDeps;
@@ -71,7 +72,7 @@ const CHECK = `(() => {
 export async function snapshot(
   htmlFile: string,
   pngFile: string | null,
-  { env = process.env, width = PAGE_WIDTH, deps = {} }: SnapshotOptions = {},
+  { env = process.env, width = PAGE_WIDTH, deps = {}, allowNetwork = false }: SnapshotOptions = {},
 ): Promise<{ issues: LayoutIssue[]; truncated: number }> {
   const { find = findChrome, launch = launchChrome } = deps;
   const chromePath = find(env);
@@ -79,8 +80,8 @@ export async function snapshot(
   const tmp = mkdtempSync(join(tmpdir(), 'explain-snapshot-'));
   let browser: Browser | null = null;
   try {
-    browser = await launch(chromePath, join(tmp, 'profile'));
-    const page = await openPage(browser.cdp, htmlFile, { width, height: 900 });
+    browser = await launch(chromePath, join(tmp, 'profile'), { allowNetwork });
+    const page = await openPage(browser.cdp, htmlFile, { width, height: 900, allowNetwork });
     await page.evaluate('document.fonts.ready.then(() => true)');
     // The CHECK expression returns this shape.
     const issues = await page.evaluate(CHECK) as LayoutIssue[];
