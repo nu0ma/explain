@@ -25,6 +25,8 @@ https://github.com/user-attachments/assets/1b36b279-ffea-496c-b2ee-9e6c4d920ac0
    /plugin install explain@explain
    ```
 
+   The marketplace installs the reviewed commit in [`source.sha`](.claude-plugin/marketplace.json). New commits on `main` do not change that release until a separate release PR advances the pin. Keep auto-update disabled for the `explain` marketplace to choose when to upgrade. See [installation, verification, and releases](docs/releases.md) for existing installs or a locally frozen catalog.
+
 2. Ask for an explanation:
 
    ```
@@ -240,6 +242,8 @@ pnpm test                        # unit tests; EXPLAIN_E2E=1 also runs the Chrom
 pnpm run build                   # rebuild skills/explain/scripts/explain.mjs and commit it
 claude plugin validate .
 ```
+
+The marketplace installs the pinned release, even from a development checkout. To try your local changes, run `claude --plugin-dir "$PWD"` instead. Publishing a new release is a separate [pin update](docs/releases.md#publish-a-release).
 
 ### Evaluating the prompt
 
