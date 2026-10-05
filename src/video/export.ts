@@ -110,6 +110,7 @@ interface CdpMessage {
 }
 
 interface Pending {
+  what: string;
   ok: (value: unknown) => void;
   fail: (err: Error) => void;
 }
@@ -291,10 +292,17 @@ export async function guardBrowserNetwork(cdp: CdpClient, onFailure: (error: Err
   const seen = new Set<string>();
   const off = cdp.on('Target.attachedToTarget', (params) => {
     if (disposed) return;
-    const { sessionId } = params as { sessionId: string };
+    const { sessionId, targetInfo } = params as { sessionId: string; targetInfo: { type: string } };
     if (seen.has(sessionId)) return;
     seen.add(sessionId);
     const configure = async () => {
+      // Generated documents prohibit workers. Raw input must not use a worker or
+      // worklet to escape the page controls, and Chromium does not support every
+      // page-level Network command on these targets. Reject before resuming them.
+      const type = targetInfo.type;
+      if (type === 'worker' || type.endsWith('_worker') || type === 'worklet' || type.endsWith('_worklet')) {
+        throw new ExportError('外部通信を止めた書き出しでは Worker / Worklet を使えません。信頼できる原稿で必要なときだけ --allow-network を付けてください');
+      }
       await blockPageNetwork(cdp, sessionId);
       // Auto-attachment is not recursive; keep descendants paused until protected too.
       await cdp.send('Target.setAutoAttach', AUTO_ATTACH, sessionId);
@@ -435,6 +443,7 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
         fail(new ExportError(`Chrome が ${timeoutMs / 1000} 秒以内に応答しません（${what}）`));
       }, timeoutMs);
       map.set(key, {
+        what,
         ok: (v) => { clearTimeout(timer); ok(v); },
         fail: (e) => { clearTimeout(timer); fail(e); },
       });
@@ -448,7 +457,7 @@ export function connect(socket: CdpSocket, { timeoutMs = CDP_TIMEOUT_MS }: { tim
       const request = msg.id ? pending.get(msg.id) : undefined;
       if (msg.id && request) {
         pending.delete(msg.id);
-        if (msg.error) request.fail(new ExportError(`CDP ${msg.error.message}`));
+        if (msg.error) request.fail(new ExportError(`CDP ${request.what}: ${msg.error.message}`));
         else request.ok(msg.result);
       } else if (msg.method) {
         const key = `${msg.sessionId ?? ''}:${msg.method}`;

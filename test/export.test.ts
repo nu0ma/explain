@@ -190,8 +190,8 @@ test('exportMp4 passes network opt-in to browser launch and every tab', async ()
 function fakeGuardClient({ failAt = '', attachOnStart = false } = {}) {
   const calls: { method: string; params: CdpParams; sessionId?: string }[] = [];
   const listeners = new Set<(params: unknown, sessionId?: string) => void>();
-  const emit = (sessionId: string, parentSessionId?: string) => {
-    for (const listener of listeners) listener({ sessionId, targetInfo: { type: 'page' }, waitingForDebugger: true }, parentSessionId);
+  const emit = (sessionId: string, parentSessionId?: string, type = 'page') => {
+    for (const listener of listeners) listener({ sessionId, targetInfo: { type }, waitingForDebugger: true }, parentSessionId);
   };
   const cdp: CdpClient = {
     async send(method, params = {}, sessionId) {
@@ -216,11 +216,11 @@ test('guardBrowserNetwork protects existing targets, popups and nested targets b
   const failures: Error[] = [];
   const dispose = await guardBrowserNetwork(cdp, (e) => failures.push(e));
   emit('popup');
-  emit('worker', 'popup');
+  emit('frame', 'popup', 'iframe');
   emit('popup'); // Repeated attachment events do not resume a target twice.
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(calls[0], { method: 'Target.setAutoAttach', params: { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId: undefined });
-  for (const id of ['existing', 'popup', 'worker']) {
+  for (const id of ['existing', 'popup', 'frame']) {
     assert.deepEqual(calls.filter((c) => c.sessionId === id).map((c) => c.method), [
       'Network.enable', 'Network.setBlockedURLs', 'Network.emulateNetworkConditions',
       'Target.setAutoAttach', 'Runtime.runIfWaitingForDebugger',
@@ -232,6 +232,22 @@ test('guardBrowserNetwork protects existing targets, popups and nested targets b
   const length = calls.length;
   emit('after-dispose');
   assert.equal(calls.length, length);
+});
+
+test('guardBrowserNetwork rejects worker and worklet targets without running them', async () => {
+  for (const type of ['worker', 'shared_worker', 'service_worker', 'worklet', 'auction_worklet', 'shared_storage_worklet']) {
+    const { cdp, calls, listeners, emit } = fakeGuardClient();
+    const failures: Error[] = [];
+    await guardBrowserNetwork(cdp, (e) => failures.push(e));
+    emit('blocked', 'parent', type);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(failures.length, 1, type);
+    assert.ok(failures[0] instanceof ExportError);
+    assert.match(failures[0].message, /Worker \/ Worklet を使えません/);
+    assert.equal(listeners.size, 0);
+    assert.deepEqual(calls.map((c) => c.method), ['Target.setAutoAttach']);
+    assert.ok(!calls.some((c) => c.method === 'Runtime.runIfWaitingForDebugger'));
+  }
 });
 
 test('guardBrowserNetwork fails closed when any security command fails', async () => {
@@ -296,7 +312,7 @@ test('connect: 応答を id で対応づけ、イベントを 1 回だけ待つ'
 
   const bad = cdp.send('X.y');
   ws.reply({ id: 2, error: { message: 'no such method' } });
-  await assert.rejects(bad, /CDP no such method/);
+  await assert.rejects(bad, /CDP X.y: no such method/);
 });
 
 test('connect supports persistent events across sessions alongside one-shot waits', async () => {

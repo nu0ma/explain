@@ -90,17 +90,52 @@ test('e2e network: export blocks requests and popups even without a document CSP
     assert.equal(await page.evaluate('window.inlineScript'), true);
     const popup = await page.send('Runtime.evaluate', { expression: `window.open('${origin}/popup') !== null`, userGesture: true, awaitPromise: false, returnByValue: true });
     assert.equal(popup.result.value, true, 'exercise a real new popup target');
-    const worker = await page.evaluate(`new Promise(resolve => {
-      const code = ${JSON.stringify(`fetch('${origin}/worker').then(() => postMessage('loaded'), () => postMessage('blocked'))`)};
-      const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
-      worker.onmessage = event => { resolve(event.data); worker.terminate(); };
-    })`);
-    assert.equal(worker, 'blocked');
     await page.send('Page.navigate', { url: `${origin}/navigation` });
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.deepEqual(requests, []);
   } finally {
     await browser?.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('e2e network: offline exports fail closed before worker code executes', e2e, async () => {
+  assert.ok(chrome);
+  const dir = mkdtempSync(join(tmpdir(), 'explain-export-worker-'));
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    requests.push(req.url ?? '');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.end('ok');
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    for (const allowNetwork of [false, true]) {
+      const browser = await launchChrome(chrome, join(dir, `profile-${allowNetwork}`), { allowNetwork });
+      try {
+        const file = join(dir, 'page.html');
+        writeFileSync(file, '<p>Worker test without a document CSP</p>');
+        const page = await openPage(browser.cdp, file, { allowNetwork });
+        const code = `fetch('${origin}/worker').then(() => postMessage('loaded'), () => postMessage('blocked'))`;
+        const result = page.evaluate(`new Promise(resolve => {
+          const worker = new Worker(URL.createObjectURL(new Blob([${JSON.stringify(code)}], { type: 'text/javascript' })));
+          worker.onmessage = event => { resolve(event.data); worker.terminate(); };
+        })`);
+        if (allowNetwork) {
+          assert.equal(await result, 'loaded');
+          assert.deepEqual(requests, ['/worker']);
+        } else {
+          await assert.rejects(result, /Worker \/ Worklet を使えません/);
+          assert.deepEqual(requests, []);
+        }
+      } finally {
+        await browser.stop();
+      }
+    }
+  } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(dir, { recursive: true, force: true });
   }
