@@ -48,6 +48,7 @@ export type CliOptions = {
   'no-open'?: boolean;
   open?: boolean;
   static?: boolean;
+  'allow-network'?: boolean;
   watch?: boolean;
   theme?: string;
   template?: string;
@@ -85,6 +86,7 @@ const USAGE = `explain ${VERSION} — Markdown の原稿から 1 ファイルの
 - ファイルの代わりに - を渡すと標準入力から読む（heredoc 向け：explain render - <<'EOF' ... EOF）。
 - 出力先の既定は ~/.explain/pages/ と ~/.explain/videos/（環境変数 EXPLAIN_HOME で変更できる）。
 - --watch はローカルのサーバーからページを配信し、原稿を保存するたびに作り直す（Ctrl+C で終了）。-o を渡すとファイルにも書く。
+- 外部の画像・CSS・スクリプトの読み込みと fetch などの通信は既定で止める。信頼できる原稿で必要なときだけ --allow-network で許可する。
 - --static は <script> を含まない HTML を出す（切り替えボタンと原稿コピーなし。配色は OS の設定に従う）。
 - --png は Chrome でページを開き、ページ全体の画像を HTML と同じ名前の .png に保存する。あわせてレイアウトを検査し、
   パネルからのはみ出し、図の外に出た文字、重なった文字を出す。
@@ -184,6 +186,7 @@ export async function main(argv: string[], io: MainIO = {}): Promise<number> {
         'no-open': { type: 'boolean' },
         open: { type: 'boolean' },
         static: { type: 'boolean' },
+        'allow-network': { type: 'boolean' },
         watch: { type: 'boolean' },
         theme: { type: 'string' },
         template: { type: 'string' },
@@ -278,7 +281,7 @@ async function cmdRender(src: string, opts: CliOptions, { print, fail, env, cwd,
   const { theme, mode, style } = config.values;
   let result;
   try {
-    result = renderDoc(src, { theme: opts.theme, template: opts.template, style: opts.style, mode: opts.mode, static: opts.static }, { theme, mode, style });
+    result = renderDoc(src, { theme: opts.theme, template: opts.template, style: opts.style, mode: opts.mode, static: opts.static }, { theme, mode, style }, { allowNetwork: opts['allow-network'] });
   } catch (e) {
     if (json) return print(JSON.stringify({ ok: false, error: errorJson(e) }, null, 2)), 1;
     return reportError(e, fail);
@@ -291,7 +294,7 @@ async function cmdRender(src: string, opts: CliOptions, { print, fail, env, cwd,
   if (opts.png) {
     png = file.replace(/\.html?$/i, '') + '.png';
     try {
-      layout = await inspect(file, png, { env });
+      layout = await inspect(file, png, { env, allowNetwork: opts['allow-network'] });
     } catch (e) {
       if (!(e instanceof ExportError)) throw e;
       png = null;
@@ -363,7 +366,7 @@ async function cmdWatch(arg: string | undefined, opts: CliOptions, { print, fail
       return null;
     }
     try {
-      const result = renderDoc(src, { theme: opts.theme, template: opts.template, style: opts.style, mode: opts.mode, static: opts.static }, { theme, mode, style });
+      const result = renderDoc(src, { theme: opts.theme, template: opts.template, style: opts.style, mode: opts.mode, static: opts.static }, { theme, mode, style }, { allowNetwork: opts['allow-network'] });
       if (out) {
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, result.html);
@@ -425,6 +428,7 @@ async function cmdVideo(
       overrides: { style: opts.style, theme: opts.theme, mode: opts.mode },
       onProgress: (msg: string) => fail(`  ${msg}`),
       encodeAudio,
+      allowNetwork: opts['allow-network'],
     });
     voiceName = provider ? provider.name : 'なし（字幕のみ）';
   } catch (e) {
@@ -443,7 +447,7 @@ async function cmdVideo(
     const mp4 = file.replace(/\.html?$/i, '') + '.mp4';
     try {
       const started = Date.now();
-      await exportMp4(file, mp4, { wav: result.wav, env, onProgress: (i: number, n: number) => fail(`  MP4 を書き出し中：${i}/${n} フレーム`) });
+      await exportMp4(file, mp4, { wav: result.wav, env, allowNetwork: opts['allow-network'], onProgress: (i: number, n: number) => fail(`  MP4 を書き出し中：${i}/${n} フレーム`) });
       print(`✓ ${mp4}（書き出し ${((Date.now() - started) / 1000).toFixed(0)} 秒）`);
     } catch (e) {
       if (!(e instanceof ExportError)) throw e;

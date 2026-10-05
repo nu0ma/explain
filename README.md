@@ -156,6 +156,16 @@ Measured on an Apple M3 Max with Node 24.21, Chrome 154, ffmpeg 8.0, and macOS `
 
 </details>
 
+## Generated HTML and network access
+
+Pages and video players block external resource loading by default with a Content Security Policy placed before author content. Inline HTML, SVG, CSS, event handlers, and JavaScript still work, including custom interactive diagrams. Images, fonts, and audio can be embedded as `data:` or `blob:` URLs. External scripts, stylesheets, images, fonts, media, `fetch`, WebSockets, frames, workers, objects, and form submissions are blocked. Relative file resources are blocked too: embed the assets to keep output self-contained. Dynamic code evaluation (`eval` / `new Function`) is also blocked by the default policy.
+
+For a trusted manuscript that needs external resources, pass `--allow-network` to `explain render` or `explain video`. This opt-in removes the resource policy from the generated file and allows network access during `--png` / `--mp4`; it also permits remote code to run. It is deliberately unavailable in frontmatter and saved config, so a manuscript cannot grant itself permission. `--static --allow-network` still blocks JavaScript, frames, objects, workers, forms, and base URLs.
+
+`--watch` permits just its local reload endpoint in the served copy; saved HTML keeps the default policy. PNG and MP4 exports additionally block network requests through Chrome DevTools before page scripts run, including newly attached popup/worker targets. Inline scripts and the video runtime remain enabled.
+
+This is defense in depth, not a sandbox for hostile HTML or JavaScript. In a normal browser, CSP does not stop top-level navigation (including `location` changes and clicked links), and it does not cover every browser network feature such as WebRTC or all DNS activity. The export controls are browser-level request controls, not an OS network firewall. Raw HTML can read and alter the generated page and its embedded manuscript. Review untrusted content before opening or exporting it; use an externally isolated environment when zero network egress is required. Previously generated files must be regenerated to gain the policy. `--allow-network` files retain their opt-in when shared.
+
 ## Use the CLI directly
 
 <details>

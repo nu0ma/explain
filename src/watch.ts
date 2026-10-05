@@ -5,6 +5,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
+import { contentSecurityPolicy } from './network.ts';
 
 const EVENTS = '/__explain/events';
 const RELOAD = `<script>new EventSource('${EVENTS}').onmessage = () => location.reload();</script>`;
@@ -43,7 +44,9 @@ export function serveWatch(file: string, build: () => string | null, { signal, o
         return;
       }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(html.replace(/<\/body>/i, `${RELOAD}\n</body>`));
+      // Only the served copy may connect to this exact reload endpoint. The saved HTML stays offline.
+      const served = html.replace(contentSecurityPolicy(), contentSecurityPolicy().replace("connect-src 'none'", `connect-src http://${req.headers.host}${EVENTS}`));
+      res.end(served.replace(/<\/body>/i, `${RELOAD}\n</body>`));
     });
 
     // Editors may replace the file on save, so watch the directory rather than the file.
