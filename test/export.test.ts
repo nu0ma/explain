@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { Writable } from 'node:stream';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { exportMp4, changedFrames, connect, guardBrowserNetwork, openPage, ExportError } from '../src/video/export.ts';
+import { exportMp4, changedFrames, chromeArgs, connect, guardBrowserNetwork, openPage, ExportError } from '../src/video/export.ts';
 import type { CdpClient, CdpParams, CdpSocket, ExportDeps } from '../src/video/export.ts';
 import type { NetworkOptions } from '../src/network.ts';
 
@@ -178,6 +178,17 @@ test('openPage blocks network before author content and supports explicit opt-in
   }
 });
 
+test('Chrome export arguments disable extension background targets without disabling sandboxing', () => {
+  const args = chromeArgs('/tmp/private export profile');
+  assert.ok(args.includes('--disable-extensions'));
+  assert.ok(args.includes('--disable-component-extensions-with-background-pages'));
+  assert.ok(args.includes('--disable-background-networking'));
+  assert.ok(args.includes('--remote-debugging-pipe'));
+  assert.ok(args.includes('--user-data-dir=/tmp/private export profile'));
+  assert.equal(args.at(-1), 'about:blank');
+  assert.ok(!args.some((arg) => /--(?:no-sandbox|disable-setuid-sandbox|disable-web-security|remote-debugging-port)/.test(arg)));
+});
+
 test('exportMp4 passes network opt-in to browser launch and every tab', async () => {
   for (const allowNetwork of [false, true]) {
     const { browser, opts } = setup();
@@ -190,8 +201,8 @@ test('exportMp4 passes network opt-in to browser launch and every tab', async ()
 function fakeGuardClient({ failAt = '', attachOnStart = false } = {}) {
   const calls: { method: string; params: CdpParams; sessionId?: string }[] = [];
   const listeners = new Set<(params: unknown, sessionId?: string) => void>();
-  const emit = (sessionId: string, parentSessionId?: string, type = 'page') => {
-    for (const listener of listeners) listener({ sessionId, targetInfo: { type }, waitingForDebugger: true }, parentSessionId);
+  const emit = (sessionId: string, parentSessionId?: string, type = 'page', url?: string) => {
+    for (const listener of listeners) listener({ sessionId, targetInfo: { type, url }, waitingForDebugger: true }, parentSessionId);
   };
   const cdp: CdpClient = {
     async send(method, params = {}, sessionId) {
@@ -247,6 +258,27 @@ test('guardBrowserNetwork rejects worker and worklet targets without running the
     assert.equal(listeners.size, 0);
     assert.deepEqual(calls.map((c) => c.method), ['Target.setAutoAttach']);
     assert.ok(!calls.some((c) => c.method === 'Runtime.runIfWaitingForDebugger'));
+  }
+});
+
+test('worker rejection identifies the target kind and scheme without disclosing URLs or source', async () => {
+  for (const [type, url, scheme] of [
+    ['service_worker', 'chrome-extension://private-extension-id/background.js', 'chrome-extension:'],
+    ['worker', 'blob:https://secret.example/private-source', 'blob:'],
+    ['worker', 'data:text/javascript,SECRET', 'data:'],
+    ['worker', 'file:///private/SECRET.js', 'file:'],
+    ['worker', 'SECRET invalid URL', 'unknown'],
+  ]) {
+    const { cdp, calls, emit } = fakeGuardClient();
+    const failures: Error[] = [];
+    await guardBrowserNetwork(cdp, (e) => failures.push(e));
+    emit('blocked', 'parent', type, url);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(failures.length, 1);
+    assert.ok(failures[0].message.includes(`type=${type}, scheme=${scheme}`));
+    assert.ok(!failures[0].message.includes(url));
+    assert.doesNotMatch(failures[0].message, /SECRET|private-extension-id|secret\.example/);
+    assert.deepEqual(calls.map((c) => c.method), ['Target.setAutoAttach']);
   }
 });
 

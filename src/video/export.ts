@@ -292,7 +292,7 @@ export async function guardBrowserNetwork(cdp: CdpClient, onFailure: (error: Err
   const seen = new Set<string>();
   const off = cdp.on('Target.attachedToTarget', (params) => {
     if (disposed) return;
-    const { sessionId, targetInfo } = params as { sessionId: string; targetInfo: { type: string } };
+    const { sessionId, targetInfo } = params as { sessionId: string; targetInfo: { type: string; url?: string } };
     if (seen.has(sessionId)) return;
     seen.add(sessionId);
     const configure = async () => {
@@ -301,7 +301,10 @@ export async function guardBrowserNetwork(cdp: CdpClient, onFailure: (error: Err
       // page-level Network command on these targets. Reject before resuming them.
       const type = targetInfo.type;
       if (type === 'worker' || type.endsWith('_worker') || type === 'worklet' || type.endsWith('_worklet')) {
-        throw new ExportError('外部通信を止めた書き出しでは Worker / Worklet を使えません。信頼できる原稿で必要なときだけ --allow-network を付けてください');
+        // Show only the target kind and scheme, never source text, URLs, or local paths.
+        let scheme = 'unknown';
+        try { scheme = new URL(targetInfo.url ?? '').protocol; } catch { /* The target may not have a URL yet. */ }
+        throw new ExportError(`外部通信を止めた書き出しでは Worker / Worklet を使えません。信頼できる原稿で必要なときだけ --allow-network を付けてください（type=${type}, scheme=${scheme}）`);
       }
       await blockPageNetwork(cdp, sessionId);
       // Auto-attachment is not recursive; keep descendants paused until protected too.
@@ -327,15 +330,22 @@ export async function guardBrowserNetwork(cdp: CdpClient, onFailure: (error: Err
   return dispose;
 }
 
-// Launches headless Chrome and talks CDP over a pipe (fds 3 and 4), so no DevTools port is opened for other local processes.
-// stop() terminates Chrome and waits up to 3 seconds for it to exit, then kills it outright.
-export async function launchChrome(chromePath: string, profileDir: string, { allowNetwork = false }: NetworkOptions = {}): Promise<Browser> {
-  const chrome = spawn(chromePath, [
+export function chromeArgs(profileDir: string): string[] {
+  return [
     '--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`,
     '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
     '--disable-background-networking',
+    // Match Chrome automation defaults: the isolated export profile needs no
+    // extensions, including Chrome's own component background pages/workers.
+    '--disable-extensions', '--disable-component-extensions-with-background-pages',
     '--force-device-scale-factor=1', '--window-size=1920,1080', 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+  ];
+}
+
+// Launches headless Chrome and talks CDP over a pipe (fds 3 and 4), so no DevTools port is opened for other local processes.
+// stop() terminates Chrome and waits up to 3 seconds for it to exit, then kills it outright.
+export async function launchChrome(chromePath: string, profileDir: string, { allowNetwork = false }: NetworkOptions = {}): Promise<Browser> {
+  const chrome = spawn(chromePath, chromeArgs(profileDir), { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
   const stop = () => new Promise<void>((r) => {
     if (chrome.exitCode !== null || chrome.signalCode !== null) return r();
     const timer = setTimeout(() => { chrome.kill('SIGKILL'); r(); }, 3000);
