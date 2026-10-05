@@ -1,3 +1,5 @@
 allowBuilds:
   esbuild: false
 savePrefix: ''
+# Wait a day before installing a newly published version (in minutes).
+minimumReleaseAge: 1440
