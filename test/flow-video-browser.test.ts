@@ -172,3 +172,32 @@ test('e2e caption: [name] は強調語になり、< や > は文字のまま出�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('e2e 再生バー：シークバーにフォーカスが残っていても、再生位置に合わせてつまみが動く', {
+  skip: !(process.env.EXPLAIN_E2E === '1' && chrome), timeout: 60000,
+}, async () => {
+  assert.ok(chrome);
+  const dir = mkdtempSync(join(tmpdir(), 'explain-seek-'));
+  let browser: Awaited<ReturnType<typeof launchChrome>> | undefined;
+  try {
+    browser = await launchChrome(chrome, join(dir, 'profile'));
+    const source = '## A\n```flow\nServer -> Client\n```\n> [Server] が応える。\n## B\n```flow\nClient -> Server\n```\n> [Client] が送る。\n';
+    const { html } = await renderVideo(source);
+    const file = join(dir, 'video.html');
+    writeFileSync(file, html);
+    const page = await openPage(browser.cdp, file);
+    const result = await page.evaluate(`(() => {
+      const seek = document.querySelector('.amv-seek');
+      const end = Number(seek.max);
+      seek.focus();
+      seek.value = String(end / 2);
+      seek.dispatchEvent(new Event('input'));
+      window.render(1);
+      return { focused: document.activeElement === seek, value: seek.value };
+    })()`);
+    assert.deepEqual(result, { focused: true, value: '1' });
+  } finally {
+    await browser?.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

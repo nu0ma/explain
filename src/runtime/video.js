@@ -309,10 +309,12 @@
   let playing = false;
   let base = 0;
   let t0 = 0;
+  // True while the user drags the seek thumb, so playback does not pull it back.
+  let dragging = false;
   const now = () => (!playing ? base : audio ? audio.currentTime : base + (performance.now() - t0) / 1000);
 
   function updateUi(t) {
-    if (document.activeElement !== seek) seek.value = t;
+    if (!dragging) seek.value = t;
     timeEl.textContent = `${fmt(t)} / ${fmt(D.duration)}`;
   }
 
@@ -364,6 +366,8 @@
   bigPlay.addEventListener('click', play);
   stage.addEventListener('click', (e) => { if (e.target !== bigPlay) toggle(); });
   seek.addEventListener('input', () => seekTo(Number(seek.value)));
+  seek.addEventListener('pointerdown', () => { dragging = true; });
+  for (const type of ['pointerup', 'pointercancel']) seek.addEventListener(type, () => { dragging = false; });
   document.addEventListener('keydown', (e) => {
     if (e.key === ' ') { e.preventDefault(); toggle(); }
     if (e.key === 'ArrowRight') seekTo(now() + 5);
