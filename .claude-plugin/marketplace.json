@@ -13,7 +13,7 @@
       "source": {
         "source": "github",
         "repo": "nu0ma/explain",
-        "sha": "d0f087bad41f9d43b51a10dd03340b2cdfbcc6eb"
+        "sha": "9f9df7fe673ea820feed4f339d2211ab9c5e2e77"
       },
       "description": "Explains something as a single-file explainer HTML page or a narrated explainer video (Japanese output)."
     }
