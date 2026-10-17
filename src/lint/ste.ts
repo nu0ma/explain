@@ -6,8 +6,8 @@
 // Skipped: code and inline code, ~~strikethrough~~ (bad examples), table rows with status no, headings, components other than callout.
 
 import { JA_VERBOSE, JA_HEDGES, JA_EMPHASIS } from './wordlist.ja.ts';
-import { checkLine, checkEmoji, checkHeading, checkSentenceEnds, checkMetrics, checkBold } from './yomiyasu.ts';
-import type { LintWarning, Sentence, TextMetrics } from './yomiyasu.ts';
+import { checkLine, checkEmoji, checkHeading, checkSentenceEnds, checkMetrics, checkBold, documentChecks, isBoldLabelItem, unitContext } from './yomiyasu.ts';
+import type { LintWarning, Sentence, TextMetrics, UnitLine } from './yomiyasu.ts';
 import type { Block, ParsedDoc } from '../parse.ts';
 import { isCJK } from '../svg/text.ts';
 
@@ -21,7 +21,19 @@ type LexicalFinding = Omit<LintWarning, 'line' | 'severity'> & { index: number }
 
 interface LintContext {
   sentences: Sentence[];
+  /** The paragraph number of the next sentence; anything other than a paragraph line starts a new one. */
+  group: number;
   metrics: TextMetrics;
+  boldLabelLines: number[];
+}
+
+/** The result of linting a document, with what the score needs besides the warnings. */
+export interface LintReport {
+  warnings: LintWarning[];
+  /** Body text length (headings, tables, quotes, code and URLs excluded). */
+  proseChars: number;
+  /** All dash findings, including those over the shown limit. */
+  dashHits: number;
 }
 
 export const LIMITS: Readonly<Record<SentenceKind, number>> = Object.freeze({ procedural: 35, descriptive: 45 });
@@ -64,9 +76,12 @@ export function formatWarning(w: Omit<LintWarning, 'suggestion'> & { suggestion?
 export const blockingWarnings = (warnings: readonly LintWarning[]): LintWarning[] => warnings.filter((w) => w.severity !== 'info');
 
 export function lintDoc(doc: ParsedDoc): LintWarning[] {
+  return lintReport(doc).warnings;
+}
+
+export function lintReport(doc: ParsedDoc): LintReport {
   const warnings: LintWarning[] = [];
-  // Aggregates for document-wide rules (sentence-end repetition, bold and list frequency).
-  const ctx: LintContext = { sentences: [], metrics: { chars: 0, lines: 0, listLines: 0, bold: 0 } };
+  const ctx: LintContext = { sentences: [], group: 0, metrics: { chars: 0, lines: 0, listLines: 0, bold: 0, prose: 0 }, boldLabelLines: [] };
   const lintBlocks = (blocks: readonly Block[]) => {
     for (const b of blocks) {
       if (b.type !== 'md' && b.lang !== 'callout') continue;
@@ -87,7 +102,9 @@ export function lintDoc(doc: ParsedDoc): LintWarning[] {
   }
   warnings.push(...checkSentenceEnds(ctx.sentences), ...checkMetrics(ctx.metrics));
   // Sort by line number (within a line, keep the order in which checks ran).
-  return warnings.map((w, i) => [w, i] as const).sort((a, b) => a[0].line - b[0].line || a[1] - b[1]).map(([w]) => w);
+  const sorted = warnings.map((w, i) => [w, i] as const).sort((a, b) => a[0].line - b[0].line || a[1] - b[1]).map(([w]) => w);
+  const { warnings: checked, dashHits } = documentChecks(sorted, ctx.metrics, ctx.boldLabelLines);
+  return { warnings: checked.sort((a, b) => a.line - b.line), proseChars: ctx.metrics.prose, dashHits };
 }
 
 // Counts for bold and list frequency (yomiyasu's analyze_markdown_metrics). Quote, table, image and HTML lines are not counted.
@@ -98,16 +115,22 @@ function countPlain(raw: string, m: TextMetrics): void {
   if (/^\s*([-*+]|\d+\.)\s+/.test(raw) && !/[-*+]\s+\[.*?\]\(https?:\/\//.test(raw)) m.listLines++;
   m.bold += raw.match(/\*\*[^*]+\*\*/g)?.length ?? 0;
   m.chars += Array.from(raw.replace(/\s+/g, '')).length;
+  if (/^#{1,6}(\s|$)/.test(t) || /^[-*_]{3,}$/.test(t)) return;
+  const visible = stripTags(raw.replace(/`[^`]*`/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\]\([^)]*\)/g, ']')).replace(/https?:\/\/\S+/g, '');
+  m.prose += Array.from(visible.replace(/\s+/g, '')).length;
 }
 
 // Collects body sentences for the sentence-end repetition check (yomiyasu's extract_plain_sentences).
 // Heading, table, quote, list and indented lines are skipped.
 function collectSentences(raw: string, line: number, ctx: LintContext): void {
   const t = raw.trim();
-  if (!t || /^(#|\||!\[|\[!\[|<|>)/.test(t) || /^[-*+]\s|^\d+\.\s/.test(t) || /^( {2}|\t)/.test(raw)) return;
-  for (const s of t.split(/(?<=[。！？])/)) {
+  if (!t || /^(#|\||!\[|\[!\[|<|>)/.test(t) || /^[-*+]\s|^\d+\.\s/.test(t) || /^( {2}|\t)/.test(raw)) {
+    ctx.group++;
+    return;
+  }
+  for (const s of clean(t).split(/(?<=[。！？])/)) {
     const text = s.trim();
-    if (Array.from(text).length > 3) ctx.sentences.push({ line, text });
+    if (Array.from(text).length > 3) ctx.sentences.push({ line, text, group: ctx.group });
   }
 }
 
@@ -138,6 +161,19 @@ function lintMarkdown(text: string, startLine: number, out: LintWarning[], ctx: 
     }
     para = null;
   };
+  let before = '';
+  let unit: (UnitLine & { kind: string; raw: string; before: string })[] = [];
+  const flushUnit = () => {
+    const context = unitContext(unit);
+    for (const { line, text, raw, before } of unit) out.push(...checkLine(text, line, { ...context.get(line), raw, before }));
+    unit = [];
+  };
+  const addUnit = (kind: string, line: number, raw: string, text: string) => {
+    if (unit.length && unit.at(-1)?.kind !== kind) flushUnit();
+    unit.push({ kind, line, raw, text, before });
+    before = text;
+  };
+  ctx.group++;
   let inHtml = false;
   text.split('\n').forEach((raw, i) => {
     const line = startLine + i;
@@ -145,41 +181,63 @@ function lintMarkdown(text: string, startLine: number, out: LintWarning[], ctx: 
     if (/^<(div|svg|table|details|figure)/i.test(t)) inHtml = true;
     if (inHtml) {
       if (/<\/(div|svg|table|details|figure)>\s*$/i.test(t)) inHtml = false;
+      before = '';
+      flushUnit();
       return flush();
     }
-    if (t) out.push(...checkEmoji(t, line));
+    if (t) out.push(...checkEmoji(t.replace(/`[^`]*`/g, '').replace(/\]\([^)]*\)|https?:\/\/\S+/g, ''), line));
     countPlain(raw, ctx.metrics);
     collectSentences(raw, line, ctx);
-    if (/^#{1,6}\s/.test(t)) out.push(...checkHeading(t, line));
-    if (!t || /^#{1,6}\s/.test(t) || /^[-*_]{3,}$/.test(t)) return flush();
-    if (/^(!\[|\[!\[|<)/.test(t)) return flush();
+    if (/^#{1,6}\s/.test(t)) {
+      out.push(...checkHeading(t, line));
+      before = clean(t.replace(/^#{1,6}\s+/, ''));
+    }
+    if (!t || /^#{1,6}\s/.test(t) || /^[-*_]{3,}$/.test(t)) {
+      if (/^[-*_]{3,}$/.test(t)) before = '';
+      flushUnit();
+      return flush();
+    }
+    if (/^(!\[|\[!\[|<)/.test(t)) {
+      before = '';
+      flushUnit();
+      return flush();
+    }
     const guess = GUESS.test(t);
     if (t.startsWith('|')) {
+      before = '';
+      flushUnit();
       flush();
       if (/^\|?[\s:|-]+\|?$/.test(t)) return;
       const cells = t.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
       if (cells.some((c) => /^(no|✗|✘)(\s|$)/.test(c))) return;
       cells.forEach((c) => {
-        const cell = clean(c.replace(/^(ok|warn|✓|✔|⚠)(\s|$)/, ''));
+        const source = c.replace(/^(ok|warn|✓|✔|⚠)(\s|$)/, '');
+        const cell = clean(source);
         checkUnit(cell, line, 'descriptive', guess, out);
-        out.push(...checkLine(cell, line));
+        out.push(...checkLine(cell, line, { table: true, raw: source }));
       });
       return;
     }
     const list = t.match(/^(?:([-*+])|(\d+)[.)])\s+(.*)$/);
     if (list) {
       flush();
+      if (isBoldLabelItem(raw)) ctx.boldLabelLines.push(line);
       const item = clean(list[3]);
       checkUnit(item, line, list[2] ? 'procedural' : 'descriptive', guess, out);
-      out.push(...checkLine(item, line));
+      addUnit('list', line, list[3], item);
       return;
     }
-    const body = clean(t.replace(/^>\s*/, ''));
+    const quote = t.startsWith('>');
+    const source = t.replace(/^>\s*/, '');
+    const body = clean(source);
     const n = checkUnit(body, line, 'descriptive', guess, out);
-    out.push(...checkLine(body, line));
+    if (quote) before = '';
+    addUnit(quote ? 'quote' : 'paragraph', line, source, body);
+    if (quote) before = '';
     if (!para) para = { line, count: 0 };
     para.count += n;
   });
+  flushUnit();
   flush();
 }
 

@@ -9,7 +9,7 @@ targets:
   - claude
 dependencies:
   apm:
-    - nanaism/yomiyasu#v1.0.5
+    - nanaism/yomiyasu#v2.0.1
   mcp: []
 includes: auto
 scripts: {}
