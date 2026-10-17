@@ -131,7 +131,7 @@ flowchart LR
 
 - Turns a PR's before and after, the flow of an incident, or a system's architecture into a one-page diagram.
 - Lays out diagrams (flow / sequence / tree, etc.) automatically: you only write the relationships.
-- Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against every rule of the [yomiyasu](https://github.com/nanaism/yomiyasu) checker for AI-style Japanese (buzzwords, metaphorical verbs, fillers, 「AではなくB」, emoji, half-width spaces around English words, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). `explain lint` also prints yomiyasu's 0–100 score.
+- Checks the prose in your script against Japanese STE rules (sentence length, redundant phrasing, hedging, etc.), and against the rules of the [yomiyasu](https://github.com/nanaism/yomiyasu) v2.0.1 checker for AI-style Japanese (buzzwords, metaphorical verbs, literal translations of English terms, fillers and stock closings, 「AではなくB」 and stacked negations, decorative dashes, leftover instructions to the AI, emoji, heading shapes, trailing colons, repeated sentence endings, excessive bold or lists, and `**` that does not render as bold). yomiyasu's comma rule, which needs a document type, is not included. `explain lint` also prints yomiyasu's 1–100 rule penalty score, which weighs the findings per 1,000 characters of body text.
 - With `--static`, emits HTML without any `<script>`, for hosts that forbid JavaScript.
 
 </details>
@@ -221,7 +221,7 @@ In consecutive video scenes, `@api[Old API]` and `@api[New API]` share the same 
 <details>
 <summary>Use the yomiyasu skill to rewrite a script</summary>
 
-`explain lint` only points out AI-style phrasing; it does not rewrite your script. To rewrite a script drafted by an AI agent before running `explain render`, use the [yomiyasu](https://github.com/nanaism/yomiyasu) Agent Skill. It is declared in `apm.yml` (pinned to v1.0.5), so [APM](https://github.com/microsoft/apm) deploys it to `.claude/skills/`:
+`explain lint` only points out AI-style phrasing; it does not rewrite your script. To rewrite a script drafted by an AI agent before running `explain render`, use the [yomiyasu](https://github.com/nanaism/yomiyasu) Agent Skill. It is declared in `apm.yml` (pinned to v2.0.1), so [APM](https://github.com/microsoft/apm) deploys it to `.claude/skills/`:
 
 ```sh
 apm install --frozen

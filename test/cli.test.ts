@@ -144,7 +144,7 @@ test('cli lint --video: ナレーションが何行続いても長い段落と�
 
 test('cli lint: AI っぽさのスコアを出す。参考の指摘だけなら strict でも 0', async () => {
   const cases = [
-    { name: 'AI の文章に多い語', stdin: '## A\n手触りと腹落ちを確かめる。', wantCode: 1, wantScore: 90 },
+    { name: 'AI の文章に多い語', stdin: '## A\n手触りと腹落ちを確かめる。', wantCode: 1, wantScore: 91 },
     { name: '参考の指摘だけ', stdin: '## A\n速さではなく正しさを選ぶ。', wantCode: 0, wantScore: 98 },
   ];
   for (const { name, stdin, wantCode, wantScore } of cases) {
