@@ -116,7 +116,7 @@ function countPlain(raw: string, m: TextMetrics): void {
   m.bold += raw.match(/\*\*[^*]+\*\*/g)?.length ?? 0;
   m.chars += Array.from(raw.replace(/\s+/g, '')).length;
   if (/^#{1,6}(\s|$)/.test(t) || /^[-*_]{3,}$/.test(t)) return;
-  const visible = raw.replace(/`[^`]*`/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\]\([^)]*\)/g, ']').replace(/<[^>]+>|https?:\/\/\S+/g, '');
+  const visible = stripTags(raw.replace(/`[^`]*`/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\]\([^)]*\)/g, ']')).replace(/https?:\/\/\S+/g, '');
   m.prose += Array.from(visible.replace(/\s+/g, '')).length;
 }
 
