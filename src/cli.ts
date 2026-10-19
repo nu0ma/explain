@@ -8,7 +8,7 @@ import { join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { renderDoc, RenderError, LintError } from './render.ts';
 import { parseDoc, ParseError, CHOICES } from './parse.ts';
-import { lintDoc, formatWarning, blockingWarnings } from './lint/ste.ts';
+import { lintDoc, lintReport, formatWarning, blockingWarnings } from './lint/ste.ts';
 import { aiScore } from './lint/yomiyasu.ts';
 import { COMPONENTS } from './components/index.ts';
 import { THEMES } from './themes/index.ts';
@@ -467,21 +467,26 @@ function cmdLint(src: string, opts: CliOptions, { print, fail }: Pick<Context, '
   }
   let style: string;
   let warnings: ReturnType<typeof lintDoc>;
+  let report: Omit<ReturnType<typeof lintReport>, 'warnings'> = { proseChars: 0, dashHits: 0 };
   try {
     if (opts.video) {
       const { video, warnings: found } = prepareVideo(src, { overrides: { style: opts.style } });
       style = video.meta.style;
       warnings = found;
+      if (style !== 'off') report = lintReport(video.doc);
     } else {
       const doc = parseDoc(src);
       style = opts.style ?? doc.meta.style;
-      warnings = style === 'off' ? [] : lintDoc(doc);
+      if (style !== 'off') ({ warnings, ...report } = lintReport(doc));
+      else warnings = [];
     }
   } catch (e) {
     return reportError(e, fail);
   }
   printWarnings(warnings, print, style);
-  if (style !== 'off') print(`  AI っぽさのスコア ${aiScore(warnings)}/100（yomiyasu の基準。AI の文章に多い書き方 1 件につき 5 点、参考の件は 2 点を引く）`);
+  if (style !== 'off') {
+    print(`  AI っぽさのスコア ${aiScore(warnings, report.proseChars, report.dashHits)}/100（yomiyasu の基準。見直し候補の重み（error 3、warn 2、info 1）を地の文 1,000 字あたりに直して出す目安で、文章の質の点数ではない）`);
+  }
   return style === 'strict' && blockingWarnings(warnings).length ? 1 : 0;
 }
 
